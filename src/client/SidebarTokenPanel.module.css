@@ -11,6 +11,13 @@
   gap: 2px;
 }
 
+.titleRow {
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  display: flex;
+}
+
 .title {
   color: var(--dsw-alias-label-tertiary);
   font-size: 11px;

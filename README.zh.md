@@ -1,65 +1,25 @@
-# dsh-token-viewer
-
-**DeepSeek Harness Web GUI** 客户端插件：展示已消耗的 token，数据来自 host 侧算好的 token-meter 会话投影（`tokenUsage` / `contextPressure` / `contextBreakdown`）——纯投影模式，无 store、无网络。
-
-两个界面：
-
-- **TokenDock** — 消息输入框上方的细条，展示*当前*会话的计费输入（未缓存 + 缓存读 + 缓存写）、输出、缓存命中率，以及带迷你进度条的近似上下文占用率。悬停查看完整计费明细。提供方上报用量之前不渲染。
-- **SidebarTokenPanel** — 侧边栏*工作区上方*的紧凑卡片，汇总所有会话的 `tokenUsage`（计费输入、输出、缓存命中率、上报会话数）。侧边栏收起时隐藏。
+# @deepseek-ai/dsh-client-ui-token-viewer
 
 [English](README.md) | 中文
 
-## 仓库结构
+Token 消耗展示插件：只读界面，数据来自 host 侧已算好的 token-meter 会话投影（`tokenUsage`、`contextPressure`、`contextBreakdown`），外加一个 DeepSeek 账号余额读取。浏览器半区不拥有领域 store、刷新链或事件监听；node 半区拥有余额行所请求的唯一 host 路由。
 
-本仓库是插件包（`@deepseek-ai/dsh-client-ui-token-viewer`）的独立驻地，目录布局与 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 的 `packages/client/*` 工作区包完全一致，可直接原样放入该仓库：
+- **`TokenDock`** 注册于 `conversation.input.dock`（order 20，位于 Goal 之后）。展示当前会话的消耗——计费输入（未缓存 + 缓存读 + 缓存写）、输出、缓存命中率，以及近似上下文占用率（`projectedTokens / contextWindow`，带迷你进度条）。悬停气泡给出完整计费明细。在提供方上报用量之前不渲染任何内容。
+- **`SidebarTokenPanel`** 注册于 `sidebar.workspaces.header`——由 ui-sidebar 外壳声明在工作区浏览区上方的一个插槽。展示 DeepSeek 账号余额（币种金额 + 刷新按钮；host 代理失败时显示错误重试），汇总所有会话行 `projectionValues` 中的 `tokenUsage`——计费输入、输出、缓存命中率、上报会话数——并可展开为按会话明细列表（每个会话的计费输入/输出，按总量降序；点击行打开该会话）。余额或用量任一存在时才渲染；侧边栏收起（`wide === false`）时不渲染。
+- **Host 半区** 注册 `GET /api/billing/balance`：从 harness **设置命名空间** `dsh-token-viewer` 读取配置（使用哪个凭据引用与提供方 base URL，默认 `DEEPSEEK_API_KEY` / `https://api.deepseek.com`，可在 `settings.yaml` 中修改），通过凭据服务（与 LLM 适配器使用同一密钥存储）解析 API key，代理 DeepSeek 的 `/user/balance`，只回余额数字——API key 永不离开服务器。
 
-```
-dsh-token-viewer/
-├── package.json            # dsh.client 清单（platform: web）
-├── src/
-│   ├── index.ts            # host 半区（空插件）
-│   ├── invariant.ts        # 包级 invariant 伴生
-│   └── client/             # 浏览器半区
-│       ├── index.ts        # apply / inject
-│       ├── TokenDock.tsx (+ .module.css)
-│       ├── SidebarTokenPanel.tsx (+ .module.css)
-│       ├── derive.ts       # 对投影值的纯展示折叠
-│       └── locales.ts      # zh / en 词典
-├── tests/                  # vitest 规格（含 cordis Context 的 HMR 卸载）
-├── patches/
-│   └── ui-sidebar-sidebar-workspaces-header.patch
-└── tsdown.config.ts / tsconfig.json
-```
-
-## 依赖
-
-- 侧边栏卡片挂载在 `sidebar.workspaces.header`——官方侧边栏外壳尚未声明该插槽。请对 deepseek-harness 源码检出中的 `packages/client/ui-sidebar` 应用 `patches/ui-sidebar-sidebar-workspaces-header.patch`（新增子槽声明、工作区区域上方的 `renderSlot` 调用与 `SlotMap` 契约），然后安装本包并启用行。
-- 读取 `@deepseek-ai/dsh-token-meter` 发布的投影（标准 web profile 已组合）。
-
-## 安装
-
-```powershell
-# 1. 在你的 deepseek-harness 源码检出中应用侧边栏外壳补丁
-git apply patches/ui-sidebar-sidebar-workspaces-header.patch
-
-# 2. 把包暴露给 web profile 的 node_modules（junction，不复制）
-New-Item -ItemType Junction -Path "$env:USERPROFILE\.dsh\profiles\node_modules\dsh-token-viewer" `
-  -Target "D:\path\to\dsh-token-viewer"
-
-# 3. 在 $env:USERPROFILE\.dsh\profiles\web\cordis.patch.yml 中启用行：
-#    - insert:
-#        - id: ui-token-viewer
-#          name: 'dsh-token-viewer'
-
-# 4. 重启 `dsh web`，然后刷新 GUI
-```
+`/client` 导出为插件主体（`apply`/`inject`）与组合后的 props 类型。
 
 ## 模型体验
 
-无。这两个界面是对 host 已算好的投影值的纯展示；不添加提示词内容、工具、消息或提供方请求。无 KV 缓存影响。
+无。两个界面是对 host 已算好的投影值的纯展示，外加一次对提供方计费端点的余额读取；插件不添加提示词内容、工具、消息或提供方请求。
+
+#### KV Cache 影响
+
+无；本插件既不组装也不发送提供方请求。
 
 ## 已知限制与暂缓事项
 
-- **启发式近似**——缓存命中率与上下文占用率继承 token-meter 固定的「4 字符 ≈ 1 token」密度估计；CJK 文本与 JSON schema 会被系统性低估。占用率是面向用户的参考数字，不是计费依据。
-- **侧边栏卡片依赖 ui-sidebar 的 header 插槽**——未打补丁的外壳会静默丢失卡片，而 dock 条仍正常。
-- **上游贡献状态**——同一改动已作为分支 `feat/ui-token-viewer` 推送到 fork `qwert702/deepseek-harness`，待 `deepseek-ai/deepseek-harness` 启用 Pull Requests 后即可发起 PR（该仓库当前禁用了 Issues/Pull Requests，跨仓库 PR 无法创建）。
+- **启发式近似**——缓存命中率与上下文占用率继承 token-meter 固定的「4 字符 ≈ 1 token」密度估计（凡提供方未计费的内容都按此计价）；CJK 文本与 JSON schema 会被系统性低估。占用率是面向用户的参考数字，不是计费或门控输入（见 token-meter README）。
+- **余额为 DeepSeek 专属**——host 路由调用 DeepSeek 的 `/user/balance`；其他提供方不在覆盖范围，多币种响应只展示 `balance_infos` 首项。
+- **侧边栏卡片依赖 ui-sidebar 的 header 插槽**——只有外壳声明 `sidebar.workspaces.header` 时才渲染；若组合层替换了不带该插槽的 ui-sidebar，卡片会静默消失，而 dock 条仍正常。

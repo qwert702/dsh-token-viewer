@@ -1,0 +1,59 @@
+.toggle {
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  background: 0 0;
+  border: none;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 16px;
+  display: inline-flex;
+}
+
+.toggle:hover {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.rows {
+  max-height: 200px;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 2px;
+  display: flex;
+}
+
+.row {
+  width: 100%;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  background: 0 0;
+  border: none;
+  border-radius: 6px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  font-size: 12px;
+  line-height: 18px;
+  display: flex;
+}
+
+.row:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.rowTitle {
+  min-width: 0;
+  color: var(--dsw-alias-label-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  overflow: hidden;
+  text-align: left;
+}
+
+.rowTokens {
+  flex: none;
+  color: var(--dsw-alias-label-caption);
+  white-space: nowrap;
+}

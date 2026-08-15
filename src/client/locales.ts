@@ -12,6 +12,12 @@ export const zh = {
   'tokens': 'tokens',
   'title': 'Token 消耗',
   'sessions': '会话',
+  'balance': '余额',
+  'refresh': '刷新余额',
+  'balanceUnavailable': '余额不可用',
+  'perSession': '按会话查看',
+  'expand': '展开',
+  'collapse': '收起',
 } satisfies Record<string, string>
 
 /** The tokenViewer namespace key union. */
@@ -29,4 +35,10 @@ export const en = {
   'tokens': 'tokens',
   'title': 'Token Usage',
   'sessions': 'sessions',
+  'balance': 'Balance',
+  'refresh': 'Refresh balance',
+  'balanceUnavailable': 'Balance unavailable',
+  'perSession': 'per-conversation',
+  'expand': 'Expand',
+  'collapse': 'Collapse',
 } satisfies Record<TokenKey, string>

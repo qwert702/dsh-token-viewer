@@ -146,3 +146,64 @@ export function deriveSidebarTotals(byId: Readonly<Record<SessionId, SessionSumm
   }
   return { uncached, cacheRead, cacheWrite, output, sessions }
 }
+
+/** One per-conversation row in the sidebar's expandable list. */
+export interface PerSessionRow {
+  id: SessionId
+  /** Human-facing label: durable title, project basename, then session id. */
+  title: string
+  /** Billed input tokens (uncached + cache read + cache write). */
+  input: number
+  output: number
+  /** Billed input + output; the list sorts by this descending. */
+  total: number
+}
+
+/**
+ * Per-session rows for the expandable list: one row per session that reported
+ * usage, ordered by total consumption (highest first).
+ * @param byId - SessionListState.byId snapshot.
+ * @returns rows with display title and billed input/output totals.
+ */
+export function derivePerSession(byId: Readonly<Record<SessionId, SessionSummary | undefined>>): PerSessionRow[] {
+  const rows: PerSessionRow[] = []
+  for (const key of Object.keys(byId)) {
+    const summary = byId[key as SessionId]
+    const usage = summary?.projectionValues?.tokenUsage
+    if (usage === undefined || usage === null) continue
+    const input = usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
+    const output = usage.outputTokens
+    if (input <= 0 && output <= 0) continue
+    rows.push({
+      id: summary.id,
+      title: summary.displayTitle,
+      input,
+      output,
+      total: input + output,
+    })
+  }
+  rows.sort((a, b) => b.total - a.total)
+  return rows
+}
+
+/**
+ * Currency symbol for the balance row; falls back to the ISO code.
+ * @param currency - ISO 4217 code from the provider.
+ * @returns display symbol.
+ */
+export function currencySymbol(currency: string | null | undefined): string {
+  if (currency === 'CNY') return '¥'
+  if (currency === 'USD') return '$'
+  if (currency === 'EUR') return '€'
+  return currency === null || currency === undefined ? '' : `${currency} `
+}
+
+/**
+ * Two-decimal money formatting for balance figures.
+ * @param value - balance amount (the provider returns strings).
+ * @returns fixed two-decimal string, or an em dash for non-finite values.
+ */
+export function formatMoney(value: number | string | null | undefined): string {
+  const n = Number(value)
+  return Number.isFinite(n) ? n.toFixed(2) : '—'
+}

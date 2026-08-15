@@ -30,7 +30,16 @@
       "path": "../ui-slots"
     },
     {
+      "path": "../../credentials/credentials"
+    },
+    {
+      "path": "../../host/webserver"
+    },
+    {
       "path": "../../llm/token-meter"
+    },
+    {
+      "path": "../../settings/settings"
     },
     {
       "path": "../../runtime-diagnostics/invariants"

@@ -31,6 +31,7 @@ async function bench() {
     },
   } as never, (() => null) as never)
   ctx.provide('locale', new LocaleRuntime(ctx))
+  ctx.provide('sessions', { open: () => {} })
   const fiber = ctx.plugin({ inject: [...inject], apply })
   return {
     ctx,
@@ -59,6 +60,13 @@ describe('ui-token-viewer browser plugin', () => {
     await b.fiber.dispose()
     expect(b.dockEntry()).toBeUndefined()
     expect(b.headerEntry()).toBeUndefined()
+  })
+
+  it('injects an openSession verb on the sidebar header card', async () => {
+    const b = await bench()
+    await b.fiber.await()
+    const face = b.headerEntry()?.inject?.() as { openSession?: (id: unknown) => void } | undefined
+    expect(typeof face?.openSession).toBe('function')
   })
 })
 
