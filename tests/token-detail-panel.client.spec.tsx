@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 /**
- * TokenDetailPanel: the right-side usage drawer — renders nothing while
- * closed, and while open shows total usage, per-workspace (project) usage,
- * and per-conversation usage; clicking a conversation row opens that session
- * and closes the panel; clicking the backdrop or close button closes it.
+ * TokenDetailPanel: the right-side usage statistics drawer styled after CC
+ * Switch's usage page — time-range filter, hero summary cards (real usage,
+ * estimated cost, cache hit rate, session count, balance), per-workspace
+ * (project) statistics, and a per-conversation log table. Clicking a
+ * conversation row opens that session and closes the panel; the backdrop or
+ * close button closes it. Cost estimation and range helpers are covered
+ * directly.
  */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -11,20 +14,28 @@ import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type { SessionId, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
 import { TokenDetailPanel } from '../src/client/TokenDetailPanel.tsx'
-import { derivePerWorkspace } from '../src/client/derive.ts'
+import {
+  DEFAULT_TOKEN_PRICES, derivePerSession, derivePerWorkspace, deriveSidebarTotals,
+  estimateCost, formatCost, rangeSinceMs,
+} from '../src/client/derive.ts'
 import { zh } from '../src/client/locales.ts'
 
 const t: Parameters<typeof TokenDetailPanel>[0]['t'] = makeTranslate(zh, commonZh)
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 const sid = (k: string): SessionId => k as SessionId
 
-function makeSummary(id: string, usage: { uncached: number; output: number; cacheRead: number; cacheWrite: number } | undefined): SessionSummary {
+const NOW = 1755000000000
+
+function makeSummary(id: string, usage: { uncached: number; output: number; cacheRead: number; cacheWrite: number } | undefined, updatedAt = NOW): SessionSummary {
   return {
     id: sid(id),
     displayTitle: `会话${id.toUpperCase()}`,
-    updatedAt: 1,
+    updatedAt,
     projectionValues: usage === undefined ? {} : { tokenUsage: usage },
   } as SessionSummary
 }
@@ -56,26 +67,38 @@ const workspaceItems = [
   { workspaceId: 'w2', title: '项目B', sessionIds: [sid('b')] },
 ]
 
+function stubBalanceOk() {
+  vi.stubGlobal('fetch', vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ ok: true, isAvailable: true, currency: 'CNY', totalBalance: '12.34', grantedBalance: '0', toppedUpBalance: '12.34' }),
+  })))
+}
+
 describe('TokenDetailPanel', () => {
   it('renders nothing while closed', () => {
     const view = render(<TokenDetailPanel {...panelProps({ open: false })} />)
     expect(view.container.firstChild).toBeNull()
   })
 
-  it('shows totals, per-workspace usage, and per-conversation usage when open', () => {
+  it('shows hero cards, project statistics, and the conversation log when open', () => {
+    stubBalanceOk()
     render(<TokenDetailPanel {...panelProps({ byId: fullById, items: workspaceItems })} />)
-    expect(screen.getByText('总用量')).toBeTruthy()
-    expect(screen.getByText('15.4K')).toBeTruthy() // billed input
-    expect(screen.getByText('4K')).toBeTruthy() // output
+    expect(screen.getByText('真实消耗')).toBeTruthy()
+    expect(screen.getByText('估算费用')).toBeTruthy()
+    expect(screen.getByText('缓存命中率')).toBeTruthy()
     expect(screen.getByText('按项目')).toBeTruthy()
     expect(screen.getByText('项目A')).toBeTruthy()
     expect(screen.getByText('项目B')).toBeTruthy()
     expect(screen.getByText('按对话')).toBeTruthy()
     expect(screen.getByText('会话A')).toBeTruthy()
     expect(screen.getByText('会话B')).toBeTruthy()
+    expect(screen.getByText('今日')).toBeTruthy() // range segmented control
+    expect(screen.getByText('近7天')).toBeTruthy()
   })
 
   it('trails usage sessions outside every workspace in an ungrouped row', () => {
+    stubBalanceOk()
     const ungrouped: Record<string, SessionSummary | undefined> = {
       ...fullById,
       c: makeSummary('c', { uncached: 100, output: 200, cacheRead: 0, cacheWrite: 0 }),
@@ -85,6 +108,7 @@ describe('TokenDetailPanel', () => {
   })
 
   it('opens a session and closes the panel on a conversation row click', () => {
+    stubBalanceOk()
     const props = panelProps({ byId: fullById, items: workspaceItems })
     render(<TokenDetailPanel {...props} />)
     fireEvent.click(screen.getByRole('button', { name: /会话A/ }))
@@ -93,6 +117,7 @@ describe('TokenDetailPanel', () => {
   })
 
   it('closes on the close button and on a backdrop click', () => {
+    stubBalanceOk()
     const viaButton = panelProps({ byId: fullById })
     render(<TokenDetailPanel {...viaButton} />)
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
@@ -106,20 +131,46 @@ describe('TokenDetailPanel', () => {
   })
 })
 
-describe('derivePerWorkspace', () => {
-  it('sums member sessions and orders rows by total descending', () => {
-    const rows = derivePerWorkspace(workspaceItems, fullById)
-    expect(rows).toHaveLength(2)
-    expect(rows[0]).toMatchObject({ id: 'w1', title: '项目A', input: 12500, output: 3450, sessions: 1 })
-    expect(rows[1]).toMatchObject({ id: 'w2', title: '项目B', input: 2900, output: 500, sessions: 1 })
+describe('usage statistics helpers', () => {
+  it('estimateCost prices each bucket under the default DeepSeek prices', () => {
+    const usage = { uncachedInputTokens: 1000000, outputTokens: 500000, cacheReadTokens: 1000000, cacheWriteTokens: 1000000 }
+    const expected = (1000000 + 1000000) / 1e6 * DEFAULT_TOKEN_PRICES.inputPerM
+      + 500000 / 1e6 * DEFAULT_TOKEN_PRICES.outputPerM
+      + 1000000 / 1e6 * DEFAULT_TOKEN_PRICES.cacheReadPerM
+      + 1000000 / 1e6 * DEFAULT_TOKEN_PRICES.cacheWritePerM
+    expect(estimateCost(usage)).toBeCloseTo(expected)
+    expect(estimateCost(usage, { inputPerM: 2, outputPerM: 4, cacheReadPerM: 0.5, cacheWritePerM: 2 })).toBeCloseTo(8.5)
   })
 
-  it('skips workspaces without usage and emits an ungrouped row for the rest', () => {
-    const withEmpty = [...workspaceItems, { workspaceId: 'w3', title: '项目C', sessionIds: [sid('zz')] }]
-    const rows = derivePerWorkspace(withEmpty, fullById)
-    expect(rows.find((r) => r.id === 'w3')).toBeUndefined()
-    const extra: Record<string, SessionSummary | undefined> = { ...fullById, c: makeSummary('c', { uncached: 100, output: 200, cacheRead: 0, cacheWrite: 0 }) }
-    const withUngrouped = derivePerWorkspace(workspaceItems, extra)
-    expect(withUngrouped.find((r) => r.title === 'ungrouped')).toMatchObject({ input: 100, output: 200, sessions: 1 })
+  it('formatCost renders ¥ with two decimals at and above a cent', () => {
+    expect(formatCost(1.5)).toBe('¥1.50')
+    expect(formatCost(0.0024)).toBe('¥0.0024')
+    expect(formatCost(Number.NaN)).toBe('¥—')
+  })
+
+  it('rangeSinceMs returns day/7-day bounds and 0 for all', () => {
+    expect(rangeSinceMs('all')).toBe(0)
+    expect(rangeSinceMs('7d')).toBeGreaterThan(0)
+    const today = rangeSinceMs('today')
+    const d = new Date(today)
+    expect(d.getHours()).toBe(0)
+    expect(d.getMinutes()).toBe(0)
+  })
+
+  it('derivePerSession filters by range, carries cacheRead/cost, and sorts by total', () => {
+    const rows = derivePerSession(fullById)
+    expect(rows[0]).toMatchObject({ id: sid('a'), input: 12500, output: 3450, cacheRead: 11000 })
+    expect(rows[0].cost).toBeGreaterThan(0)
+    const stale: Record<string, SessionSummary | undefined> = { ...fullById, a: makeSummary('a', usageA, 1) }
+    const filtered = derivePerSession(stale, rangeSinceMs('7d'))
+    expect(filtered.map((r) => r.id)).not.toContain(sid('a'))
+  })
+
+  it('deriveSidebarTotals and derivePerWorkspace honor the range', () => {
+    const stale: Record<string, SessionSummary | undefined> = { ...fullById, a: makeSummary('a', usageA, 1) }
+    expect(deriveSidebarTotals(stale, rangeSinceMs('7d')).sessions).toBe(1)
+    const rows = derivePerWorkspace(workspaceItems, stale, rangeSinceMs('7d'))
+    expect(rows.find((r) => r.id === 'w1')).toBeUndefined()
+    expect(rows.find((r) => r.id === 'w2')).toMatchObject({ input: 2900, output: 500 })
   })
 })

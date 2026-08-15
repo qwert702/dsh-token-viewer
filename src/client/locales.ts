@@ -24,6 +24,13 @@ export const zh = {
   'byConversation': '按对话',
   'close': '关闭',
   'ungrouped': '未分组',
+  'cost': '估算费用',
+  'realUsage': '真实消耗',
+  'range': '时间范围',
+  'today': '今日',
+  'last7d': '近7天',
+  'all': '全部',
+  'time': '时间',
 } satisfies Record<string, string>
 
 /** The tokenViewer namespace key union. */
@@ -53,4 +60,11 @@ export const en = {
   'byConversation': 'By conversation',
   'close': 'Close',
   'ungrouped': 'Ungrouped',
+  'cost': 'Est. cost',
+  'realUsage': 'Real usage',
+  'range': 'Time range',
+  'today': 'Today',
+  'last7d': 'Last 7 days',
+  'all': 'All',
+  'time': 'Time',
 } satisfies Record<TokenKey, string>

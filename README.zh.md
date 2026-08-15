@@ -5,7 +5,7 @@
 Token 消耗展示插件：只读界面，数据来自 host 侧已算好的 token-meter 会话投影（`tokenUsage`、`contextPressure`、`contextBreakdown`），外加一个 DeepSeek 账号余额读取。浏览器半区不拥有领域 store、刷新链或事件监听；node 半区拥有余额行所请求的唯一 host 路由。
 
 - **`TokenDock`** 注册于 `conversation.input.dock`（order 20，位于 Goal 之后）。展示当前会话的消耗——计费输入（未缓存 + 缓存读 + 缓存写）、输出、缓存命中率，以及近似上下文占用率（`projectedTokens / contextWindow`，带迷你进度条）。悬停气泡给出完整计费明细。在提供方上报用量之前不渲染任何内容。
-- **`SidebarTokenPanel`** 注册于 `sidebar.workspaces.header`——由 ui-sidebar 外壳声明在工作区浏览区上方的一个插槽。展示 DeepSeek 账号余额（币种金额 + 刷新按钮；host 代理失败时显示错误重试），汇总所有会话行 `projectionValues` 中的 `tokenUsage`——计费输入、输出、缓存命中率、上报会话数——可展开为按会话明细列表（每个会话的计费输入/输出，按总量降序；点击行打开该会话），并可打开**右侧用量详情面板**（`TokenDetailPanel`，注册于 `shell.overlay`），内含总用量、按项目（工作区）用量与按对话用量。余额或用量任一存在时才渲染；侧边栏收起（`wide === false`）时不渲染。
+- **`SidebarTokenPanel`** 注册于 `sidebar.workspaces.header`——由 ui-sidebar 外壳声明在工作区浏览区上方的一个插槽。展示 DeepSeek 账号余额（币种金额 + 刷新按钮；host 代理失败时显示错误重试），汇总所有会话行 `projectionValues` 中的 `tokenUsage`——计费输入、输出、缓存命中率、上报会话数——可展开为按会话明细列表（每个会话的计费输入/输出，按总量降序；点击行打开该会话），并可打开**右侧用量统计面板**（`TokenDetailPanel`，注册于 `shell.overlay`），模仿 CC Switch 用量页：时间范围筛选（全部/今日/近7天）、Hero 汇总卡（真实消耗、**估算费用**、缓存命中率、会话数、余额）、按项目（工作区）统计表，以及按对话日志表（时间/输入/输出/缓存/费用）。余额或用量任一存在时才渲染；侧边栏收起（`wide === false`）时不渲染。
 - **Host 半区** 注册 `GET /api/billing/balance`：从 harness **设置命名空间** `dsh-token-viewer` 读取配置（使用哪个凭据引用与提供方 base URL，默认 `DEEPSEEK_API_KEY` / `https://api.deepseek.com`，可在 `settings.yaml` 中修改），通过凭据服务（与 LLM 适配器使用同一密钥存储）解析 API key，代理 DeepSeek 的 `/user/balance`，只回余额数字——API key 永不离开服务器。
 
 `/client` 导出为插件主体（`apply`/`inject`）与组合后的 props 类型。

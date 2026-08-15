@@ -127,16 +127,20 @@ export interface SidebarTokenTotals {
 /**
  * Aggregate `tokenUsage` across every session row's projection values.
  * @param byId - SessionListState.byId snapshot.
+ * @param sinceMs - optional lower bound on last activity (0 = all sessions).
  * @returns summed buckets and the number of sessions that reported usage.
  */
-export function deriveSidebarTotals(byId: Readonly<Record<SessionId, SessionSummary | undefined>>): SidebarTokenTotals {
+export function deriveSidebarTotals(byId: Readonly<Record<SessionId, SessionSummary | undefined>>, sinceMs = 0): SidebarTokenTotals {
   let uncached = 0
   let cacheRead = 0
   let cacheWrite = 0
   let output = 0
   let sessions = 0
   for (const key of Object.keys(byId)) {
-    const usage = byId[key as SessionId]?.projectionValues?.tokenUsage
+    const summary = byId[key as SessionId]
+    if (summary === undefined) continue
+    if (sinceMs > 0 && summary.updatedAt < sinceMs) continue
+    const usage = summary.projectionValues?.tokenUsage
     if (usage === undefined || usage === null) continue
     uncached += usage.uncachedInputTokens
     cacheRead += usage.cacheReadTokens
@@ -155,21 +159,30 @@ export interface PerSessionRow {
   /** Billed input tokens (uncached + cache read + cache write). */
   input: number
   output: number
+  /** Cache-read tokens (the log table's cache column). */
+  cacheRead: number
   /** Billed input + output; the list sorts by this descending. */
   total: number
+  /** Estimated cost (CNY) under the default DeepSeek prices. */
+  cost: number
+  /** Last activity timestamp, used by the detail panel's time-range filter. */
+  updatedAt: number
 }
 
 /**
  * Per-session rows for the expandable list: one row per session that reported
  * usage, ordered by total consumption (highest first).
  * @param byId - SessionListState.byId snapshot.
+ * @param sinceMs - optional lower bound on last activity (0 = all sessions).
  * @returns rows with display title and billed input/output totals.
  */
-export function derivePerSession(byId: Readonly<Record<SessionId, SessionSummary | undefined>>): PerSessionRow[] {
+export function derivePerSession(byId: Readonly<Record<SessionId, SessionSummary | undefined>>, sinceMs = 0): PerSessionRow[] {
   const rows: PerSessionRow[] = []
   for (const key of Object.keys(byId)) {
     const summary = byId[key as SessionId]
-    const usage = summary?.projectionValues?.tokenUsage
+    if (summary === undefined) continue
+    if (sinceMs > 0 && summary.updatedAt < sinceMs) continue
+    const usage = summary.projectionValues?.tokenUsage
     if (usage === undefined || usage === null) continue
     const input = usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
     const output = usage.outputTokens
@@ -179,11 +192,78 @@ export function derivePerSession(byId: Readonly<Record<SessionId, SessionSummary
       title: summary.displayTitle,
       input,
       output,
+      cacheRead: usage.cacheReadTokens,
       total: input + output,
+      cost: estimateCost(usage),
+      updatedAt: summary.updatedAt,
     })
   }
   rows.sort((a, b) => b.total - a.total)
   return rows
+}
+
+/** DeepSeek per-million-token prices in CNY (provider list price for v4-flash). */
+export interface TokenPrices {
+  /** Uncached + cache-write input price per 1M tokens. */
+  inputPerM: number
+  outputPerM: number
+  /** Cache-hit (read) price per 1M tokens. */
+  cacheReadPerM: number
+  cacheWritePerM: number
+}
+
+/** Default prices: DeepSeek v4-flash, CNY per 1M tokens. */
+export const DEFAULT_TOKEN_PRICES: TokenPrices = {
+  inputPerM: 1,
+  outputPerM: 2,
+  cacheReadPerM: 0.2,
+  cacheWritePerM: 1,
+}
+
+/**
+ * Estimate cost (CNY) from one usage bucket under the given prices. Cache
+ * writes bill at their own price (defaults to the input price, matching
+ * DeepSeek's list pricing for cache misses).
+ * @param usage - a token-usage projection value.
+ * @param prices - per-million-token prices (defaults to DeepSeek v4-flash).
+ * @returns estimated cost in CNY.
+ */
+export function estimateCost(usage: TokenUsageProjection, prices: TokenPrices = DEFAULT_TOKEN_PRICES): number {
+  return (usage.uncachedInputTokens + usage.cacheWriteTokens) / 1e6 * prices.inputPerM
+    + usage.outputTokens / 1e6 * prices.outputPerM
+    + usage.cacheReadTokens / 1e6 * prices.cacheReadPerM
+    + usage.cacheWriteTokens / 1e6 * prices.cacheWritePerM
+}
+
+/**
+ * Compact CNY cost: two decimals at and above ¥0.01, four below.
+ * @param value - cost in CNY.
+ * @returns display string with the ¥ symbol.
+ */
+export function formatCost(value: number): string {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return '¥—'
+  return n >= 0.01 ? `¥${n.toFixed(2)}` : `¥${n.toFixed(4)}`
+}
+
+/** Time-range presets for the detail panel. */
+export type UsageRange = 'all' | 'today' | '7d'
+
+/**
+ * Lower bound (ms) for a detail-panel range: today at 00:00, seven days back,
+ * or 0 for everything.
+ * @param range - selected range.
+ * @returns the lower bound timestamp in ms.
+ */
+export function rangeSinceMs(range: UsageRange): number {
+  const now = Date.now()
+  if (range === 'today') {
+    const d = new Date(now)
+    d.setHours(0, 0, 0, 0)
+    return d.getTime()
+  }
+  if (range === '7d') return now - 7 * 24 * 60 * 60 * 1000
+  return 0
 }
 
 /**
@@ -218,6 +298,8 @@ export interface PerWorkspaceRow {
   output: number
   /** Number of member sessions that reported usage. */
   sessions: number
+  /** Estimated cost (CNY) under the default DeepSeek prices. */
+  cost: number
 }
 
 /**
@@ -226,11 +308,13 @@ export interface PerWorkspaceRow {
  * sessions that belong to no workspace trail in an `ungrouped` row.
  * @param workspaces - WorkspaceListState.items snapshot (Host order).
  * @param byId - SessionListState.byId snapshot.
+ * @param sinceMs - optional lower bound on last activity (0 = all sessions).
  * @returns rows with workspace title and summed billed input/output.
  */
 export function derivePerWorkspace(
   workspaces: readonly WorkspaceView[],
   byId: Readonly<Record<SessionId, SessionSummary | undefined>>,
+  sinceMs = 0,
 ): PerWorkspaceRow[] {
   const rows: PerWorkspaceRow[] = []
   const covered = new Set<SessionId>()
@@ -238,31 +322,41 @@ export function derivePerWorkspace(
     let input = 0
     let output = 0
     let sessions = 0
+    let cost = 0
     for (const id of workspace.sessionIds) {
       covered.add(id)
-      const usage = byId[id]?.projectionValues?.tokenUsage
+      const summary = byId[id]
+      if (summary === undefined) continue
+      if (sinceMs > 0 && summary.updatedAt < sinceMs) continue
+      const usage = summary.projectionValues?.tokenUsage
       if (usage === undefined || usage === null) continue
       input += usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
       output += usage.outputTokens
       sessions += 1
+      cost += estimateCost(usage)
     }
     if (input <= 0 && output <= 0) continue
-    rows.push({ id: workspace.workspaceId, title: workspace.title || workspace.workspaceId, input, output, sessions })
+    rows.push({ id: workspace.workspaceId, title: workspace.title || workspace.workspaceId, input, output, sessions, cost })
   }
   let ungroupedInput = 0
   let ungroupedOutput = 0
   let ungroupedSessions = 0
+  let ungroupedCost = 0
   for (const key of Object.keys(byId)) {
     const id = key as SessionId
     if (covered.has(id)) continue
-    const usage = byId[id]?.projectionValues?.tokenUsage
+    const summary = byId[id]
+    if (summary === undefined) continue
+    if (sinceMs > 0 && summary.updatedAt < sinceMs) continue
+    const usage = summary.projectionValues?.tokenUsage
     if (usage === undefined || usage === null) continue
     ungroupedInput += usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
     ungroupedOutput += usage.outputTokens
     ungroupedSessions += 1
+    ungroupedCost += estimateCost(usage)
   }
   if (ungroupedInput > 0 || ungroupedOutput > 0) {
-    rows.push({ id: UNGROUPED_ID, title: 'ungrouped', input: ungroupedInput, output: ungroupedOutput, sessions: ungroupedSessions })
+    rows.push({ id: UNGROUPED_ID, title: 'ungrouped', input: ungroupedInput, output: ungroupedOutput, sessions: ungroupedSessions, cost: ungroupedCost })
   }
   rows.sort((a, b) => (b.input + b.output) - (a.input + a.output))
   return rows

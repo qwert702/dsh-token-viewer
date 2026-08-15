@@ -106,8 +106,8 @@ describe('BalanceRow', () => {
 
 describe('PerSessionList', () => {
   const rows = [
-    { id: sid('a'), title: '会话A', input: 12500, output: 3450, total: 15950 },
-    { id: sid('b'), title: '会话B', input: 2900, output: 500, total: 3400 },
+    { id: sid('a'), title: '会话A', input: 12500, output: 3450, cacheRead: 11000, total: 15950, cost: 0.1, updatedAt: 1 },
+    { id: sid('b'), title: '会话B', input: 2900, output: 500, cacheRead: 2000, total: 3400, cost: 0.02, updatedAt: 1 },
   ]
 
   it('renders nothing for an empty list', () => {
