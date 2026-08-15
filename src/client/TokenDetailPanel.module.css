@@ -1,0 +1,148 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.35);
+  justify-content: flex-end;
+  display: flex;
+}
+
+.panel {
+  box-sizing: border-box;
+  width: min(480px, 92vw);
+  height: 100%;
+  background: var(--dsw-alias-bg-base);
+  border-left: 1px solid var(--dsw-alias-border-l1);
+  box-shadow: -12px 0 32px rgb(0 0 0 / 0.25);
+  flex-direction: column;
+  display: flex;
+  overflow: hidden;
+}
+
+.header {
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  display: flex;
+}
+
+.headerTitle {
+  color: var(--dsw-alias-label-primary);
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.close {
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  color: var(--dsw-alias-label-tertiary);
+  background: 0 0;
+  border: none;
+  border-radius: 50%;
+  flex: none;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  display: inline-flex;
+}
+
+.close:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 14px;
+  display: flex;
+  overflow-y: auto;
+}
+
+.section {
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  display: flex;
+}
+
+.sectionTitle {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+}
+
+.totalRow {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  display: flex;
+}
+
+.seg {
+  color: var(--dsw-alias-label-caption);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.seg strong {
+  color: var(--dsw-alias-label-secondary);
+  font-weight: 600;
+}
+
+.rows {
+  flex-direction: column;
+  gap: 2px;
+  display: flex;
+}
+
+.row,
+.rowButton {
+  width: 100%;
+  color: var(--dsw-alias-label-secondary);
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  font-size: 12px;
+  line-height: 18px;
+  display: flex;
+  box-sizing: border-box;
+}
+
+.rowButton {
+  cursor: pointer;
+  background: 0 0;
+  border: none;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.rowButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.rowTitle {
+  min-width: 0;
+  color: var(--dsw-alias-label-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  overflow: hidden;
+}
+
+.rowTokens {
+  flex: none;
+  color: var(--dsw-alias-label-caption);
+  white-space: nowrap;
+}

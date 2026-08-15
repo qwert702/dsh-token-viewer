@@ -18,6 +18,23 @@
   display: flex;
 }
 
+.detailButton {
+  align-self: flex-start;
+  color: var(--dsw-alias-state-business-primary);
+  cursor: pointer;
+  background: 0 0;
+  border: none;
+  gap: 4px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 16px;
+  display: inline-flex;
+}
+
+.detailButton:hover {
+  color: var(--dsw-alias-label-secondary);
+}
+
 .title {
   color: var(--dsw-alias-label-tertiary);
   font-size: 11px;

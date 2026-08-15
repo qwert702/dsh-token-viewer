@@ -18,6 +18,12 @@ export const zh = {
   'perSession': '按会话查看',
   'expand': '展开',
   'collapse': '收起',
+  'detail': '用量详情',
+  'total': '总用量',
+  'byProject': '按项目',
+  'byConversation': '按对话',
+  'close': '关闭',
+  'ungrouped': '未分组',
 } satisfies Record<string, string>
 
 /** The tokenViewer namespace key union. */
@@ -41,4 +47,10 @@ export const en = {
   'perSession': 'per-conversation',
   'expand': 'Expand',
   'collapse': 'Collapse',
+  'detail': 'Usage details',
+  'total': 'Total usage',
+  'byProject': 'By project',
+  'byConversation': 'By conversation',
+  'close': 'Close',
+  'ungrouped': 'Ungrouped',
 } satisfies Record<TokenKey, string>

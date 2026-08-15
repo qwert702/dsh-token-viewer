@@ -9,7 +9,7 @@ import type {
   ContextPressureProjection,
   TokenUsageProjection,
 } from '@deepseek-ai/dsh-token-meter/client'
-import type { SessionId, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId, SessionSummary, WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-client-runtime/client'
 
 /**
  * Compact token count: 517 / 12.2K / 517K / 1.2M (one decimal under three digits).
@@ -207,3 +207,66 @@ export function formatMoney(value: number | string | null | undefined): string {
   const n = Number(value)
   return Number.isFinite(n) ? n.toFixed(2) : '—'
 }
+
+/** One per-workspace row in the detail panel's project breakdown. */
+export interface PerWorkspaceRow {
+  id: WorkspaceId
+  /** Human-facing label: workspace title, falling back to its id. */
+  title: string
+  /** Billed input tokens (uncached + cache read + cache write). */
+  input: number
+  output: number
+  /** Number of member sessions that reported usage. */
+  sessions: number
+}
+
+/**
+ * Per-workspace rows for the detail panel: one row per workspace whose member
+ * sessions reported usage, ordered by total consumption (highest first). Usage
+ * sessions that belong to no workspace trail in an `ungrouped` row.
+ * @param workspaces - WorkspaceListState.items snapshot (Host order).
+ * @param byId - SessionListState.byId snapshot.
+ * @returns rows with workspace title and summed billed input/output.
+ */
+export function derivePerWorkspace(
+  workspaces: readonly WorkspaceView[],
+  byId: Readonly<Record<SessionId, SessionSummary | undefined>>,
+): PerWorkspaceRow[] {
+  const rows: PerWorkspaceRow[] = []
+  const covered = new Set<SessionId>()
+  for (const workspace of workspaces) {
+    let input = 0
+    let output = 0
+    let sessions = 0
+    for (const id of workspace.sessionIds) {
+      covered.add(id)
+      const usage = byId[id]?.projectionValues?.tokenUsage
+      if (usage === undefined || usage === null) continue
+      input += usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
+      output += usage.outputTokens
+      sessions += 1
+    }
+    if (input <= 0 && output <= 0) continue
+    rows.push({ id: workspace.workspaceId, title: workspace.title || workspace.workspaceId, input, output, sessions })
+  }
+  let ungroupedInput = 0
+  let ungroupedOutput = 0
+  let ungroupedSessions = 0
+  for (const key of Object.keys(byId)) {
+    const id = key as SessionId
+    if (covered.has(id)) continue
+    const usage = byId[id]?.projectionValues?.tokenUsage
+    if (usage === undefined || usage === null) continue
+    ungroupedInput += usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
+    ungroupedOutput += usage.outputTokens
+    ungroupedSessions += 1
+  }
+  if (ungroupedInput > 0 || ungroupedOutput > 0) {
+    rows.push({ id: UNGROUPED_ID, title: 'ungrouped', input: ungroupedInput, output: ungroupedOutput, sessions: ungroupedSessions })
+  }
+  rows.sort((a, b) => (b.input + b.output) - (a.input + a.output))
+  return rows
+}
+
+/** Stable pseudo-id for the ungrouped row in the project breakdown. */
+const UNGROUPED_ID = 'ungrouped' as WorkspaceId

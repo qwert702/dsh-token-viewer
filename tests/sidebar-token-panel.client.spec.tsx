@@ -37,12 +37,15 @@ function makeSummary(id: string, usage: { uncached: number; output: number; cach
 
 function panelProps(byId: Record<string, SessionSummary | undefined>, wide = true) {
   const openSession = vi.fn()
+  const setOpen = vi.fn()
   return {
     wide,
     t,
     openSession,
+    useStore: (sel: (s: { open: boolean }) => unknown) => sel({ open: false }),
+    actions: { setOpen },
     useSessions: (sel: (state: { byId: Record<string, SessionSummary | undefined> }) => unknown) => sel({ byId }),
-  } as unknown as Parameters<typeof SidebarTokenPanel>[0] & { openSession: ReturnType<typeof vi.fn> }
+  } as unknown as Parameters<typeof SidebarTokenPanel>[0] & { openSession: ReturnType<typeof vi.fn>; actions: { setOpen: ReturnType<typeof vi.fn> } }
 }
 
 function stubBalanceOk() {
@@ -161,6 +164,15 @@ describe('SidebarTokenPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /按会话查看/ }))
     fireEvent.click(screen.getByRole('button', { name: /会话A/ }))
     expect(props.openSession).toHaveBeenCalledWith(sid('a'))
+  })
+
+  it('opens the detail panel from the detail button', () => {
+    const props = panelProps({
+      a: makeSummary('a', { uncached: 1200, output: 3450, cacheRead: 11000, cacheWrite: 300 }),
+    })
+    render(<SidebarTokenPanel {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: /用量详情/ }))
+    expect(props.actions.setOpen).toHaveBeenCalledWith(true)
   })
 
   it('renders nothing in the collapsed rail and nothing without usage when balance fails', async () => {

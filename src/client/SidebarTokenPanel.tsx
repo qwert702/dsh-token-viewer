@@ -8,7 +8,7 @@
  * collapsed rail (wide === false).
  */
 import { useMemo, useState } from 'react'
-import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { PropsLocale, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: pulls ui-sidebar's SlotMap merge (the sidebar.workspaces.header entry).
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
@@ -18,6 +18,7 @@ import { useBalance } from './balance.ts'
 import { BalanceRow } from './BalanceRow.tsx'
 import { derivePerSession, deriveSidebarTotals, formatTokens } from './derive.ts'
 import { PerSessionList } from './PerSessionList.tsx'
+import type { TokenDetailStore } from './token-detail-store.ts'
 import css from './SidebarTokenPanel.module.css'
 
 /** Business face injected by the client plugin body: open a session by id. */
@@ -25,15 +26,15 @@ export interface SidebarTokenPanelInjected {
   openSession: (sessionId: SessionId) => void
 }
 
-/** Full props of the header card: global seat + owner wide flag + injected open + locale. */
-export type SidebarTokenPanelProps = PropsRuntime<'sidebar.workspaces.header'> & SidebarTokenPanelInjected & PropsLocale<'tokenViewer'>
+/** Full props of the header card: global seat + shared store + injected open + locale. */
+export type SidebarTokenPanelProps = PropsRuntime<'sidebar.workspaces.header'> & PropsStore<TokenDetailStore> & SidebarTokenPanelInjected & PropsLocale<'tokenViewer'>
 
 /**
  * Header-card adapter: aggregates the per-session `tokenUsage` projection
- * values over the session list and composes the balance row + the
- * per-conversation list.
+ * values over the session list, composes the balance row + the
+ * per-conversation list, and opens the detail panel through the shared store.
  */
-export function SidebarTokenPanel({ useSessions, wide, t, openSession }: SidebarTokenPanelProps) {
+export function SidebarTokenPanel({ useSessions, useStore, actions, wide, t, openSession }: SidebarTokenPanelProps) {
   const byId = useSessions((state) => state.byId)
   const totals = useMemo(() => deriveSidebarTotals(byId), [byId])
   const perSession = useMemo(() => derivePerSession(byId), [byId])
@@ -65,6 +66,9 @@ export function SidebarTokenPanel({ useSessions, wide, t, openSession }: Sidebar
           {totals.sessions > 1 && <span className={css.seg}>{t('sessions')} <strong>{totals.sessions}</strong></span>}
         </div>
       )}
+      <button type="button" className={css.detailButton} onClick={() => { actions.setOpen(true) }}>
+        {t('detail')} →
+      </button>
       <PerSessionList rows={perSession} open={open} onToggle={() => { setOpen((v) => !v) }} onOpen={openSession} t={t} />
     </div>
   )
