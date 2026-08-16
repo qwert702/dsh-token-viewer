@@ -14,6 +14,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 // Type-only: pulls the credentials Context merge (ctx.credentials).
 import type {} from '@deepseek-ai/dsh-credentials'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
@@ -39,13 +40,99 @@ export const Config = z.object({
 
 /** Cordis plugin name for the host half. */
 export const name = 'dsh-token-viewer-host'
-/** Services required by the balance route and its settings namespace. */
-export const inject = ['webServer', 'credentials', 'settings']
+/** Services required by the balance route, its settings namespace, and the model-usage projection. */
+export const inject = ['webServer', 'credentials', 'settings', 'sessionProjections']
 
 /** Resolved balance proxy configuration. */
 interface BalanceConfig {
   apiKeyRef: string
   baseURL: string
+}
+
+/** Per-model usage buckets folded from the session log. */
+interface ModelUsageBuckets {
+  uncachedInputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  /** Number of assistant steps reported under this model. */
+  requests: number
+}
+
+/** State of the modelUsage projection: one bucket row per model id. */
+interface ModelUsageState {
+  byModel: Record<string, ModelUsageBuckets>
+}
+
+/** Zero bucket for a model that has not reported yet. */
+const zeroModelUsage = (): ModelUsageBuckets => ({
+  uncachedInputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  requests: 0,
+})
+
+/** Wire schema for the modelUsage projection value. */
+const modelUsageSchema = z.object({
+  byModel: z.record(z.string(), z.object({
+    uncachedInputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    cacheReadTokens: z.number().int().nonnegative(),
+    cacheWriteTokens: z.number().int().nonnegative(),
+    requests: z.number().int().nonnegative(),
+  })),
+})
+
+/**
+ * Fold one committed event into the per-model usage state. Only
+ * `assistant/message` events with provider usage attribute their buckets to
+ * the message's model (`message.source.model`) — the same authoritative
+ * per-step sample token-meter uses.
+ * @param state - the state covering all prior events.
+ * @param event - one committed session event.
+ * @returns the next state (unchanged reference for uninterested events).
+ */
+function modelUsageApply(state: ModelUsageState, event: SessionEvent): ModelUsageState {
+  if (event.type !== 'assistant/message') return state
+  const usage = event.data.usage
+  if (usage === undefined) return state
+  const model = event.data.message.source?.model
+  if (model === undefined || model === '') return state
+  const input = usage.inputTokens + (usage.cacheWriteTokens ?? 0)
+  if (input + usage.outputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0) <= 0) return state
+  const prev = state.byModel[model] ?? zeroModelUsage()
+  return {
+    ...state,
+    byModel: {
+      ...state.byModel,
+      [model]: {
+        uncachedInputTokens: prev.uncachedInputTokens + usage.inputTokens,
+        outputTokens: prev.outputTokens + usage.outputTokens,
+        cacheReadTokens: prev.cacheReadTokens + (usage.cacheReadTokens ?? 0),
+        cacheWriteTokens: prev.cacheWriteTokens + (usage.cacheWriteTokens ?? 0),
+        requests: prev.requests + 1,
+      },
+    },
+  }
+}
+
+/**
+ * Register the modelUsage session projection: per-model consumption for the
+ * model-statistics table. The projection registry is provided by the host.
+ * @param ctx - host context carrying the sessionProjections service.
+ */
+function installModelUsageProjection(ctx: Context): void {
+  ctx.inject(['sessionProjections'], (projectionCtx) => {
+    projectionCtx.sessionProjections.register({
+      key: 'modelUsage',
+      schema: modelUsageSchema,
+      init: (): ModelUsageState => ({ byModel: {} }),
+      apply: modelUsageApply,
+      view: (state: ModelUsageState): ModelUsageState => state,
+      stateVersion: 1,
+    })
+  })
 }
 
 /**
@@ -119,6 +206,7 @@ async function handleBalance(
  * @param ctx - host context carrying the webServer, credentials, and settings services.
  */
 export function apply(ctx: Context): void {
+  installModelUsageProjection(ctx)
   let source: () => BalanceConfig = () => ({ apiKeyRef: DEFAULT_API_KEY_REF, baseURL: DEFAULT_BASE_URL })
   installSettingsSection(ctx, BALANCE_NAMESPACE, BALANCE_SCHEMA, ctx.config, {
     setSource: (current) => { source = current },

@@ -36,6 +36,12 @@
       "path": "../../host/webserver"
     },
     {
+      "path": "../../session/session"
+    },
+    {
+      "path": "../../session/session-projection"
+    },
+    {
       "path": "../../llm/token-meter"
     },
     {

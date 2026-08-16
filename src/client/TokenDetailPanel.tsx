@@ -10,7 +10,9 @@
  * when open. The time range and the trend filter by each session's last
  * activity — the harness projects cumulative totals, not per-request usage,
  * so the numbers are approximate for non-"all" ranges and the trend is by last
- * activity; model stats attribute all usage to the deployment default model.
+ * activity; model stats fold the host's per-model `modelUsage` projection
+ * (each session's assistant usage attributed to its message model), falling
+ * back to the deployment default model only when no session reports it.
  */
 import { useMemo, useState } from 'react'
 import type { PropsLocale, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
@@ -21,7 +23,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-token-meter/client'
 import { useBalance } from './balance.ts'
 import {
-  derivePerSession, derivePerWorkspace, deriveSidebarTotals, deriveUsageTrend, formatCost,
+  derivePerModel, derivePerSession, derivePerWorkspace, deriveSidebarTotals, deriveUsageTrend, formatCost,
   formatMoney, formatTokens, rangeSinceMs, type UsageRange,
 } from './derive.ts'
 import type { TokenDetailStore } from './token-detail-store.ts'
@@ -72,6 +74,7 @@ export function TokenDetailPanel({ useStore, useSessions, useWorkspaces, actions
   const totals = useMemo(() => deriveSidebarTotals(byId, sinceMs), [byId, sinceMs])
   const perWorkspace = useMemo(() => derivePerWorkspace(workspaceItems, byId, sinceMs), [workspaceItems, byId, sinceMs])
   const perSession = useMemo(() => derivePerSession(byId, sinceMs), [byId, sinceMs])
+  const perModel = useMemo(() => derivePerModel(byId, sinceMs), [byId, sinceMs])
   const trend = useMemo(() => deriveUsageTrend(byId, range), [byId, range])
   const trendMax = useMemo(() => Math.max(1, ...trend.map((p) => p.input + p.output + p.cacheRead)), [trend])
   if (!open) return null
@@ -150,13 +153,25 @@ export function TokenDetailPanel({ useStore, useSessions, useWorkspaces, actions
                 <span className={css.colNum}>{t('output')}</span>
                 <span className={css.colNum}>{t('cost')}</span>
               </div>
-              <div className={css.tableRow}>
-                <span className={css.colModel} title={getDefaultModel()}>{getDefaultModel()}</span>
-                <span className={css.colNum}>{totals.sessions}</span>
-                <span className={css.colNum}>{formatTokens(input)}</span>
-                <span className={css.colNum}>{formatTokens(totals.output)}</span>
-                <span className={css.colNum}>{formatCost(cost)}</span>
-              </div>
+              {perModel.length > 0
+                ? perModel.map((row) => (
+                  <div key={row.model} className={css.tableRow}>
+                    <span className={css.colModel} title={row.model}>{row.model}</span>
+                    <span className={css.colNum}>{row.sessions}</span>
+                    <span className={css.colNum}>{formatTokens(row.uncached + row.cacheRead + row.cacheWrite)}</span>
+                    <span className={css.colNum}>{formatTokens(row.output)}</span>
+                    <span className={css.colNum}>{formatCost(row.cost)}</span>
+                  </div>
+                ))
+                : (
+                  <div className={css.tableRow}>
+                    <span className={css.colModel} title={getDefaultModel()}>{getDefaultModel()}</span>
+                    <span className={css.colNum}>{totals.sessions}</span>
+                    <span className={css.colNum}>{formatTokens(input)}</span>
+                    <span className={css.colNum}>{formatTokens(totals.output)}</span>
+                    <span className={css.colNum}>{formatCost(cost)}</span>
+                  </div>
+                )}
             </div>
           </section>
 

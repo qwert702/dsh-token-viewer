@@ -419,3 +419,73 @@ export function derivePerWorkspace(
 
 /** Stable pseudo-id for the ungrouped row in the project breakdown. */
 const UNGROUPED_ID = 'ungrouped' as WorkspaceId
+
+/** Per-model usage buckets folded host-side from the session log. */
+export interface ModelUsageBuckets {
+  uncachedInputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  /** Number of assistant steps reported under this model. */
+  requests: number
+}
+
+/** The modelUsage session projection value: one bucket row per model id. */
+export interface ModelUsageProjection {
+  byModel: Record<string, ModelUsageBuckets>
+}
+
+declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionMap {
+    /** Per-model consumption folded from assistant usage (host half). */
+    modelUsage: ModelUsageProjection
+  }
+}
+
+/** One row in the model-statistics table. */
+export interface PerModelRow {
+  model: string
+  /** Number of sessions that reported usage under this model. */
+  sessions: number
+  uncached: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  /** Estimated cost (CNY) under the default DeepSeek prices. */
+  cost: number
+  /** Uncached + cache write + output; sorts the table descending. */
+  total: number
+}
+
+/**
+ * Aggregate the per-session `modelUsage` projection values into per-model
+ * rows, ordered by total consumption (highest first).
+ * @param byId - SessionListState.byId snapshot.
+ * @param sinceMs - optional lower bound on last activity (0 = all sessions).
+ * @returns one row per model that reported usage.
+ */
+export function derivePerModel(byId: Readonly<Record<SessionId, SessionSummary | undefined>>, sinceMs = 0): PerModelRow[] {
+  const acc = new Map<string, PerModelRow>()
+  for (const key of Object.keys(byId)) {
+    const summary = byId[key as SessionId]
+    if (summary === undefined) continue
+    if (sinceMs > 0 && summary.updatedAt < sinceMs) continue
+    const usage = summary.projectionValues?.modelUsage
+    if (usage === undefined || usage === null) continue
+    for (const [model, buckets] of Object.entries(usage.byModel)) {
+      const prev = acc.get(model)
+      const next: PerModelRow = prev ?? { model, sessions: 0, uncached: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, total: 0 }
+      next.sessions += 1
+      next.uncached += buckets.uncachedInputTokens
+      next.output += buckets.outputTokens
+      next.cacheRead += buckets.cacheReadTokens
+      next.cacheWrite += buckets.cacheWriteTokens
+      next.cost += estimateCost(buckets)
+      next.total = next.uncached + next.cacheRead + next.cacheWrite + next.output
+      acc.set(model, next)
+    }
+  }
+  const rows = [...acc.values()]
+  rows.sort((a, b) => b.total - a.total)
+  return rows
+}

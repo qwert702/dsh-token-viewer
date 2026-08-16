@@ -16,11 +16,17 @@ function bench(over: {
 } = {}) {
   let route: { kind: string; path: string; handler: (req: unknown, res: { writeHead: (s: number) => void; end: (b: string) => void }) => Promise<void> } | undefined
   const balanceConfig = over.config ?? { apiKeyRef: 'DEEPSEEK_API_KEY', baseURL: 'https://api.deepseek.com' }
+  const projectionRegistrations: unknown[] = []
   const ctx = {
     effect(fn: () => void) { fn() },
-    inject(_services: string[], cb: (sctx: { settings: { register: () => { get: () => typeof balanceConfig } }; effect: (fn: () => void) => void }) => void) {
+    inject(_services: string[], cb: (sctx: {
+      settings: { register: () => { get: () => typeof balanceConfig } }
+      sessionProjections: { register: (def: unknown) => void }
+      effect: (fn: () => void) => void
+    }) => void) {
       cb({
         settings: { register: () => ({ get: () => balanceConfig }) },
+        sessionProjections: { register: (def: unknown) => { projectionRegistrations.push(def) } },
         effect: (fn: () => void) => fn(),
       })
     },
@@ -46,15 +52,41 @@ function bench(over: {
       await route!.handler({}, f.res)
       return { status: f.status(), json: JSON.parse(f.body()) as Record<string, unknown> }
     },
+    projectionRegistrations,
   }
 }
 
 describe('dsh-token-viewer host balance route', () => {
-  it('declares the webserver, credentials, and settings services', () => {
+  it('declares the webserver, credentials, settings, and sessionProjections services', () => {
     expect(name).toBe('dsh-token-viewer-host')
     expect(inject).toContain('webServer')
     expect(inject).toContain('credentials')
     expect(inject).toContain('settings')
+    expect(inject).toContain('sessionProjections')
+  })
+
+  it('registers the modelUsage projection unit', () => {
+    const b = bench()
+    expect(b.projectionRegistrations).toHaveLength(1)
+    const def = b.projectionRegistrations[0] as { key: string; init: () => unknown; apply: (s: unknown, e: unknown) => unknown }
+    expect(def.key).toBe('modelUsage')
+    expect(def.init()).toEqual({ byModel: {} })
+  })
+
+  it('folds assistant usage into per-model buckets', () => {
+    const b = bench()
+    const def = b.projectionRegistrations[0] as { apply: (s: { byModel: Record<string, unknown> }, e: unknown) => unknown }
+    const event = (model: string, usage: unknown) => ({ type: 'assistant/message', data: { message: { source: { model } }, usage } })
+    let state = { byModel: {} }
+    state = def.apply(state, event('deepseek-v4-flash', { inputTokens: 1000, outputTokens: 2000, cacheReadTokens: 500, cacheWriteTokens: 100 })) as typeof state
+    state = def.apply(state, event('deepseek-v4-flash', { inputTokens: 400, outputTokens: 600 })) as typeof state
+    state = def.apply(state, event('deepseek-v4-pro', { inputTokens: 10, outputTokens: 20 })) as typeof state
+    state = def.apply(state, event('deepseek-v4-pro', undefined)) as typeof state // no usage: ignored
+    const unchanged = state
+    state = def.apply(state, { type: 'turn/start', data: {} }) as typeof state // uninterested: same ref
+    expect(state).toBe(unchanged)
+    expect(state.byModel['deepseek-v4-flash']).toEqual({ uncachedInputTokens: 1400, outputTokens: 2600, cacheReadTokens: 500, cacheWriteTokens: 100, requests: 2 })
+    expect(state.byModel['deepseek-v4-pro']).toEqual({ uncachedInputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, requests: 1 })
   })
 
   it('answers 503 no-api-key when the credential is unconfigured', async () => {

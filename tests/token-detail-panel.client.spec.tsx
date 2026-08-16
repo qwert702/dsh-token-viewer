@@ -15,7 +15,7 @@ import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts
 import type { SessionId, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
 import { TokenDetailPanel } from '../src/client/TokenDetailPanel.tsx'
 import {
-  DEFAULT_TOKEN_PRICES, derivePerSession, derivePerWorkspace, deriveSidebarTotals, deriveUsageTrend,
+  DEFAULT_TOKEN_PRICES, derivePerModel, derivePerSession, derivePerWorkspace, deriveSidebarTotals, deriveUsageTrend,
   estimateCost, formatCost, rangeSinceMs, trendBucketMs,
 } from '../src/client/derive.ts'
 import { zh } from '../src/client/locales.ts'
@@ -31,12 +31,20 @@ const sid = (k: string): SessionId => k as SessionId
 
 const NOW = 1755000000000
 
-function makeSummary(id: string, usage: { uncached: number; output: number; cacheRead: number; cacheWrite: number } | undefined, updatedAt = NOW): SessionSummary {
+function makeSummary(
+  id: string,
+  usage: { uncached: number; output: number; cacheRead: number; cacheWrite: number } | undefined,
+  updatedAt = NOW,
+  modelUsage?: { byModel: Record<string, { uncachedInputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; requests: number }> },
+): SessionSummary {
   return {
     id: sid(id),
     displayTitle: `会话${id.toUpperCase()}`,
     updatedAt,
-    projectionValues: usage === undefined ? {} : { tokenUsage: usage },
+    projectionValues: {
+      ...(usage === undefined ? {} : { tokenUsage: usage }),
+      ...(modelUsage === undefined ? {} : { modelUsage }),
+    },
   } as SessionSummary
 }
 
@@ -59,8 +67,8 @@ function panelProps(over: { open?: boolean; byId?: Record<string, SessionSummary
 }
 
 const fullById: Record<string, SessionSummary | undefined> = {
-  a: makeSummary('a', usageA),
-  b: makeSummary('b', usageB),
+  a: makeSummary('a', usageA, NOW, { byModel: { 'deepseek-v4-flash': { uncachedInputTokens: 1200, outputTokens: 3450, cacheReadTokens: 11000, cacheWriteTokens: 300, requests: 1 } } }),
+  b: makeSummary('b', usageB, NOW, { byModel: { 'deepseek-v4-pro': { uncachedInputTokens: 800, outputTokens: 500, cacheReadTokens: 2000, cacheWriteTokens: 100, requests: 1 } } }),
 }
 
 const workspaceItems = [
@@ -91,6 +99,7 @@ describe('TokenDetailPanel', () => {
     expect(screen.getByText('使用趋势')).toBeTruthy()
     expect(screen.getByText('模型统计')).toBeTruthy()
     expect(screen.getByText('deepseek-v4-flash')).toBeTruthy()
+    expect(screen.getByText('deepseek-v4-pro')).toBeTruthy()
     expect(screen.getByText('按项目')).toBeTruthy()
     expect(screen.getByText('项目A')).toBeTruthy()
     expect(screen.getByText('项目B')).toBeTruthy()
@@ -200,5 +209,21 @@ describe('usage statistics helpers', () => {
     const daily = deriveUsageTrend(byId, '7d')
     expect(daily).toHaveLength(1)
     expect(daily[0]).toMatchObject({ input: usageA.uncached + usageA.cacheWrite + usageB.uncached + usageB.cacheWrite })
+  })
+
+  it('derivePerModel aggregates modelUsage across sessions and sorts by total', () => {
+    const rows = derivePerModel(fullById)
+    expect(rows).toHaveLength(2)
+    const flash = rows.find((r) => r.model === 'deepseek-v4-flash')
+    expect(flash).toMatchObject({ sessions: 1, uncached: 1200, output: 3450, cacheRead: 11000, cacheWrite: 300 })
+    const pro = rows.find((r) => r.model === 'deepseek-v4-pro')
+    expect(pro).toMatchObject({ sessions: 1, uncached: 800, output: 500 })
+    // flash total > pro total, so it sorts first
+    expect(rows[0].model).toBe('deepseek-v4-flash')
+    // range filter drops stale sessions
+    const stale: Record<string, SessionSummary | undefined> = { ...fullById, a: makeSummary('a', usageA, 1, fullById.a!.projectionValues!.modelUsage) }
+    const filtered = derivePerModel(stale, rangeSinceMs('7d'))
+    expect(filtered.map((r) => r.model)).not.toContain('deepseek-v4-flash')
+    expect(filtered.map((r) => r.model)).toContain('deepseek-v4-pro')
   })
 })
