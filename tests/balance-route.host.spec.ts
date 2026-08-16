@@ -65,12 +65,15 @@ describe('dsh-token-viewer host balance route', () => {
     expect(inject).toContain('sessionProjections')
   })
 
-  it('registers the modelUsage projection unit', () => {
+  it('registers the modelUsage and usageLog projection units', () => {
     const b = bench()
-    expect(b.projectionRegistrations).toHaveLength(1)
-    const def = b.projectionRegistrations[0] as { key: string; init: () => unknown; apply: (s: unknown, e: unknown) => unknown }
-    expect(def.key).toBe('modelUsage')
-    expect(def.init()).toEqual({ byModel: {} })
+    expect(b.projectionRegistrations).toHaveLength(2)
+    const keys = b.projectionRegistrations.map((def) => (def as { key: string }).key)
+    expect(keys).toEqual(['modelUsage', 'usageLog'])
+    const modelUsage = b.projectionRegistrations[0] as { init: () => unknown }
+    const usageLog = b.projectionRegistrations[1] as { init: () => unknown }
+    expect(modelUsage.init()).toEqual({ byModel: {} })
+    expect(usageLog.init()).toEqual({ entries: [] })
   })
 
   it('folds assistant usage into per-model buckets', () => {
@@ -87,6 +90,27 @@ describe('dsh-token-viewer host balance route', () => {
     expect(state).toBe(unchanged)
     expect(state.byModel['deepseek-v4-flash']).toEqual({ uncachedInputTokens: 1400, outputTokens: 2600, cacheReadTokens: 500, cacheWriteTokens: 100, requests: 2 })
     expect(state.byModel['deepseek-v4-pro']).toEqual({ uncachedInputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0, requests: 1 })
+  })
+
+  it('appends one timestamped usageLog entry per reported assistant step', () => {
+    const b = bench()
+    const def = b.projectionRegistrations[1] as { apply: (s: { entries: unknown[] }, e: unknown) => unknown }
+    const event = (time: number, model: string, usage: unknown) => ({ type: 'assistant/message', time, data: { message: { source: { model } }, usage } })
+    let state = { entries: [] }
+    state = def.apply(state, event(1755000000000, 'deepseek-v4-flash', { inputTokens: 1000, outputTokens: 2000, cacheReadTokens: 500, cacheWriteTokens: 100 })) as typeof state
+    state = def.apply(state, event(1755000600000, 'deepseek-v4-flash', { inputTokens: 400, outputTokens: 600 })) as typeof state
+    state = def.apply(state, event(1755001200000, 'deepseek-v4-pro', { inputTokens: 10, outputTokens: 20, cacheReadTokens: 5, cacheWriteTokens: 2 })) as typeof state
+    state = def.apply(state, event(1755001800000, 'deepseek-v4-pro', undefined)) as typeof state // no usage: ignored
+    state = def.apply(state, event(1755002400000, '', { inputTokens: 1, outputTokens: 1 })) as typeof state // no model: ignored
+    state = def.apply(state, event(1755003000000, 'deepseek-v4-pro', { inputTokens: 0, outputTokens: 0 })) as typeof state // zero usage: ignored
+    const unchanged = state
+    state = def.apply(state, { type: 'turn/start', time: 1755003600000, data: {} }) as typeof state // uninterested: same ref
+    expect(state).toBe(unchanged)
+    expect(state.entries).toEqual([
+      { t: 1755000000000, m: 'deepseek-v4-flash', i: 1000, o: 2000, r: 500, w: 100 },
+      { t: 1755000600000, m: 'deepseek-v4-flash', i: 400, o: 600, r: 0, w: 0 },
+      { t: 1755001200000, m: 'deepseek-v4-pro', i: 10, o: 20, r: 5, w: 2 },
+    ])
   })
 
   it('answers 503 no-api-key when the credential is unconfigured', async () => {

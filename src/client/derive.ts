@@ -249,79 +249,386 @@ export function formatCost(value: number): string {
   return n >= 0.01 ? `¥${n.toFixed(2)}` : `¥${n.toFixed(4)}`
 }
 
-/** Time-range presets for the detail panel. */
-export type UsageRange = 'all' | 'today' | '7d'
+// --------------------------------------------------------------------------------
+// CC Switch statistics method: aggregates fold per-request usage records (the
+// host `usageLog` projection), never cumulative session totals, so every
+// figure below is exact — time bucketing uses each request's own commit time,
+// ranges cut on true request time, and cost is the four per-bucket prices
+// summed once per request (CC Switch's Claude-semantics calculator).
+// --------------------------------------------------------------------------------
 
-/**
- * Lower bound (ms) for a detail-panel range: today at 00:00, seven days back,
- * or 0 for everything.
- * @param range - selected range.
- * @returns the lower bound timestamp in ms.
- */
-export function rangeSinceMs(range: UsageRange): number {
-  const now = Date.now()
-  if (range === 'today') {
-    const d = new Date(now)
-    d.setHours(0, 0, 0, 0)
-    return d.getTime()
+/** One per-request usage record, the client mirror of the host usageLog entry. */
+export interface UsageLogEntry {
+  /** Commit time (the assistant/message event's `time`, epoch ms). */
+  t: number
+  /** Model the request ran under. */
+  m: string
+  /** Fresh (uncached) input tokens. */
+  i: number
+  /** Output tokens. */
+  o: number
+  /** Cache-read tokens. */
+  r: number
+  /** Cache-write tokens. */
+  w: number
+}
+
+/** The usageLog session projection value: one entry per reported assistant step. */
+export interface UsageLogProjection {
+  entries: UsageLogEntry[]
+}
+
+declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionMap {
+    /** Per-request usage log for the CC Switch-style statistics (host half). */
+    usageLog: UsageLogProjection
   }
-  if (range === '7d') return now - 7 * 24 * 60 * 60 * 1000
-  return 0
 }
 
-/** One bucket of the usage-trend chart. */
-export interface TrendPoint {
-  /** Bucket label: `HH:00` for hourly, `M/D` for daily. */
-  label: string
-  /** Bucket key (epoch ms of the bucket start) for hover grouping. */
-  key: number
-  input: number
-  output: number
-  cacheRead: number
+/** One billed request carrying its session identity and per-record cost. */
+export interface RequestRecord {
+  sessionId: SessionId
+  sessionTitle: string
+  model: string
+  t: number
+  /** Fresh (uncached) input tokens. */
+  i: number
+  o: number
+  r: number
+  w: number
+  /** Four-bucket estimated cost (CNY) under the default prices. */
+  cost: number
 }
 
-/** Bucket size for a range: hourly for today, daily otherwise. */
-export function trendBucketMs(range: UsageRange): number {
-  return range === 'today' ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000
+/** Milliseconds in one day. */
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/** CC Switch range presets: the day, fixed lookback windows, everything. */
+export type UsageRange = 'today' | '7d' | '14d' | '30d' | 'all'
+
+/** Resolved range bounds in epoch ms. */
+export interface ResolvedUsageRange {
+  startDate: number
+  endDate: number
 }
 
 /**
- * Approximate usage trend: each session's cumulative usage is bucketed by its
- * last activity time (the harness projects cumulative totals, not per-request
- * usage, so the trend is by last activity — see the panel's note).
+ * Resolve a preset to concrete bounds, exactly as CC Switch does: `today`
+ * spans local midnight to now, the N-day presets start at the local midnight
+ * of (N − 1) days back (so `7d` is seven calendar days including today), and
+ * `all` has no lower bound.
+ * @param range - selected preset.
+ * @param nowMs - clock the range resolves against.
+ * @returns inclusive start (0 for all) and exclusive end in epoch ms.
+ */
+export function resolveUsageRange(range: UsageRange, nowMs: number = Date.now()): ResolvedUsageRange {
+  const midnight = (ms: number): number => {
+    const d = new Date(ms)
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  }
+  if (range === 'today') return { startDate: midnight(nowMs), endDate: nowMs }
+  if (range !== 'all') {
+    const days = range === '7d' ? 7 : range === '14d' ? 14 : 30
+    return { startDate: midnight(nowMs - (days - 1) * DAY_MS), endDate: nowMs }
+  }
+  return { startDate: 0, endDate: nowMs }
+}
+
+/**
+ * Collect every session's per-request records within the range. Sessions from
+ * before this plugin's usageLog projection (no entries anywhere) fall back to
+ * one synthesized record per session at its last activity, modeled from the
+ * cumulative tokenUsage and the session's modelUsage model — the numbers stay
+ * approximate only for that legacy tail.
  * @param byId - SessionListState.byId snapshot.
- * @param range - selected range (today = hourly, 7d/all = daily).
- * @returns ordered trend points for the range's buckets with any usage.
+ * @param range - selected preset.
+ * @param nowMs - clock the range resolves against.
+ * @returns records with session identity, bucketed cost attached.
  */
-export function deriveUsageTrend(byId: Readonly<Record<SessionId, SessionSummary | undefined>>, range: UsageRange): TrendPoint[] {
-  const sinceMs = rangeSinceMs(range)
-  const bucketMs = trendBucketMs(range)
-  const buckets = new Map<number, TrendPoint>()
-  const now = Date.now()
-  const hourLabel = (ts: number): string => `${new Date(ts).getHours()}:00`
-  const dayLabel = (ts: number): string => {
-    const d = new Date(ts)
-    return `${d.getMonth() + 1}/${d.getDate()}`
-  }
-  const labelOf = (ts: number): string => (range === 'today' ? hourLabel(ts) : dayLabel(ts))
+export function collectRequestRecords(
+  byId: Readonly<Record<SessionId, SessionSummary | undefined>>,
+  range: UsageRange,
+  nowMs: number = Date.now(),
+): RequestRecord[] {
+  const { startDate, endDate } = resolveUsageRange(range, nowMs)
+  const inRange = (t: number): boolean => t >= startDate && t <= endDate
+  const summaries: SessionSummary[] = []
   for (const key of Object.keys(byId)) {
     const summary = byId[key as SessionId]
-    if (summary === undefined) continue
-    if (sinceMs > 0 && summary.updatedAt < sinceMs) continue
+    if (summary !== undefined) summaries.push(summary)
+  }
+  const records: RequestRecord[] = []
+  const push = (summary: SessionSummary, entry: UsageLogEntry): void => {
+    records.push({
+      sessionId: summary.id,
+      sessionTitle: summary.displayTitle,
+      model: entry.m,
+      t: entry.t,
+      i: entry.i,
+      o: entry.o,
+      r: entry.r,
+      w: entry.w,
+      cost: estimateCost({ uncachedInputTokens: entry.i, outputTokens: entry.o, cacheReadTokens: entry.r, cacheWriteTokens: entry.w }),
+    })
+  }
+  const logged = summaries.some((summary) => (summary.projectionValues?.usageLog?.entries?.length ?? 0) > 0)
+  if (logged) {
+    for (const summary of summaries) {
+      for (const entry of summary.projectionValues?.usageLog?.entries ?? []) {
+        if (inRange(entry.t)) push(summary, entry)
+      }
+    }
+    return records
+  }
+  for (const summary of summaries) {
     const usage = summary.projectionValues?.tokenUsage
     if (usage === undefined || usage === null) continue
     if (usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens + usage.outputTokens <= 0) continue
-    const ts = Math.min(summary.updatedAt, now)
-    const bucketStart = Math.floor(ts / bucketMs) * bucketMs
-    const point = buckets.get(bucketStart) ?? { label: labelOf(bucketStart), key: bucketStart, input: 0, output: 0, cacheRead: 0 }
-    point.input += usage.uncachedInputTokens + usage.cacheWriteTokens
-    point.output += usage.outputTokens
-    point.cacheRead += usage.cacheReadTokens
-    buckets.set(bucketStart, point)
+    const models = Object.keys(summary.projectionValues?.modelUsage?.byModel ?? {})
+    const entry: UsageLogEntry = {
+      t: summary.updatedAt,
+      m: models.length === 1 ? models[0] : '',
+      i: usage.uncachedInputTokens,
+      o: usage.outputTokens,
+      r: usage.cacheReadTokens,
+      w: usage.cacheWriteTokens,
+    }
+    if (inRange(entry.t)) push(summary, entry)
   }
-  const points = [...buckets.values()]
-  points.sort((a, b) => a.key - b.key)
-  return points
+  return records
+}
+
+/** CC Switch's UsageSummary: headline figures over a set of requests. */
+export interface UsageSummary {
+  requests: number
+  cost: number
+  /** Fresh (uncached) input tokens. */
+  input: number
+  output: number
+  cacheWrite: number
+  cacheRead: number
+  /** input + output + cacheWrite + cacheRead — everything the model processed. */
+  realTotal: number
+  /** cacheRead / (input + cacheWrite + cacheRead), 0–1; 0 when nothing cacheable. */
+  cacheHitRate: number
+}
+
+/**
+ * Fold records into the CC Switch summary: realTotal counts all four buckets,
+ * the hit rate denominates on the cacheable input side only.
+ * @param records - per-request records in the range.
+ * @returns the summary figures.
+ */
+export function usageSummary(records: readonly RequestRecord[]): UsageSummary {
+  let requests = 0
+  let cost = 0
+  let input = 0
+  let output = 0
+  let cacheWrite = 0
+  let cacheRead = 0
+  for (const record of records) {
+    requests += 1
+    cost += record.cost
+    input += record.i
+    output += record.o
+    cacheWrite += record.w
+    cacheRead += record.r
+  }
+  const cacheable = input + cacheWrite + cacheRead
+  return {
+    requests,
+    cost,
+    input,
+    output,
+    cacheWrite,
+    cacheRead,
+    realTotal: input + output + cacheWrite + cacheRead,
+    cacheHitRate: cacheable > 0 ? cacheRead / cacheable : 0,
+  }
+}
+
+/** One trend bucket: hourly for the day preset, daily otherwise. */
+export interface TrendBucket {
+  /** Bucket start, epoch ms. */
+  t: number
+  /** `HH:00` for hourly buckets, `M/D` for daily ones. */
+  label: string
+  requests: number
+  cost: number
+  input: number
+  output: number
+  cacheWrite: number
+  cacheRead: number
+  /** input + output (CC Switch's total_tokens column). */
+  total: number
+}
+
+/**
+ * CC Switch usage trend: requests bucketed by their own commit time — hourly
+ * when the range spans one day, daily otherwise — with every bucket in the
+ * range materialized, empty ones zero-filled, so gaps show as real gaps.
+ * @param records - per-request records.
+ * @param range - selected preset.
+ * @param nowMs - clock the range resolves against.
+ * @returns the range's buckets in ascending time order.
+ */
+export function usageTrend(records: readonly RequestRecord[], range: UsageRange, nowMs: number = Date.now()): TrendBucket[] {
+  const { startDate, endDate } = resolveUsageRange(range, nowMs)
+  const bucketMs = range === 'today' ? 60 * 60 * 1000 : DAY_MS
+  const bucketCount = range === 'today'
+    ? Math.max(1, Math.ceil((endDate - startDate) / bucketMs))
+    : Math.floor((endDate - startDate) / DAY_MS) + 1
+  const buckets: TrendBucket[] = []
+  for (let index = 0; index < bucketCount; index += 1) {
+    const t = startDate + index * bucketMs
+    const d = new Date(t)
+    buckets.push({
+      t,
+      label: range === 'today' ? `${String(d.getHours()).padStart(2, '0')}:00` : `${d.getMonth() + 1}/${d.getDate()}`,
+      requests: 0,
+      cost: 0,
+      input: 0,
+      output: 0,
+      cacheWrite: 0,
+      cacheRead: 0,
+      total: 0,
+    })
+  }
+  for (const record of records) {
+    if (record.t < startDate || record.t > endDate) continue
+    const index = Math.min(bucketCount - 1, Math.floor((record.t - startDate) / bucketMs))
+    const bucket = buckets[index]
+    bucket.requests += 1
+    bucket.cost += record.cost
+    bucket.input += record.i
+    bucket.output += record.o
+    bucket.cacheWrite += record.w
+    bucket.cacheRead += record.r
+    bucket.total = bucket.input + bucket.output
+  }
+  return buckets
+}
+
+/** One row of the model-statistics table. */
+export interface ModelStatRow {
+  model: string
+  requests: number
+  /** Fresh input + output (CC Switch's total_tokens column). */
+  totalTokens: number
+  cost: number
+  /** cost / requests (CC Switch shows six decimals). */
+  avgCost: number
+}
+
+/**
+ * Per-model rows in CC Switch's shape: request count, fresh-input-plus-output
+ * tokens, total and average cost, ordered by total cost descending.
+ * @param records - per-request records in the range.
+ * @returns one row per model that billed in the range.
+ */
+export function modelStats(records: readonly RequestRecord[]): ModelStatRow[] {
+  const acc = new Map<string, ModelStatRow>()
+  for (const record of records) {
+    const model = record.model === '' ? '—' : record.model
+    const prev = acc.get(model)
+    const next = prev ?? { model, requests: 0, totalTokens: 0, cost: 0, avgCost: 0 }
+    next.requests += 1
+    next.totalTokens += record.i + record.o
+    next.cost += record.cost
+    acc.set(model, next)
+  }
+  const rows = [...acc.values()]
+  for (const row of rows) row.avgCost = row.requests > 0 ? row.cost / row.requests : 0
+  rows.sort((a, b) => b.cost - a.cost)
+  return rows
+}
+
+/** One row of the project (workspace) statistics table. */
+export interface ProjectStatRow {
+  id: WorkspaceId
+  title: string
+  requests: number
+  input: number
+  output: number
+  cacheWrite: number
+  cacheRead: number
+  cost: number
+}
+
+/** Stable pseudo-id for records outside every workspace. */
+const UNGROUPED_RECORDS_ID = 'ungrouped' as WorkspaceId
+
+/**
+ * Per-workspace rows folded from per-request records, in workspace order with
+ * an `ungrouped` row trailing for sessions that belong to no workspace.
+ * @param workspaces - WorkspaceListState.items snapshot (host order).
+ * @param records - per-request records in the range.
+ * @returns rows with per-workspace requests, token buckets, and cost.
+ */
+export function projectStats(workspaces: readonly WorkspaceView[], records: readonly RequestRecord[]): ProjectStatRow[] {
+  const rows: ProjectStatRow[] = []
+  const bySession = new Map<SessionId, ProjectStatRow>()
+  for (const workspace of workspaces) {
+    const row: ProjectStatRow = { id: workspace.workspaceId, title: workspace.title || workspace.workspaceId, requests: 0, input: 0, output: 0, cacheWrite: 0, cacheRead: 0, cost: 0 }
+    rows.push(row)
+    for (const id of workspace.sessionIds) bySession.set(id, row)
+  }
+  const ungrouped: ProjectStatRow = { id: UNGROUPED_RECORDS_ID, title: 'ungrouped', requests: 0, input: 0, output: 0, cacheWrite: 0, cacheRead: 0, cost: 0 }
+  for (const record of records) {
+    const row = bySession.get(record.sessionId) ?? ungrouped
+    row.requests += 1
+    row.input += record.i
+    row.output += record.o
+    row.cacheWrite += record.w
+    row.cacheRead += record.r
+    row.cost += record.cost
+  }
+  if (ungrouped.requests > 0) rows.push(ungrouped)
+  return rows.filter((row) => row.requests > 0)
+}
+
+/**
+ * Request-log rows: every record in the range, newest first (CC Switch orders
+ * by created_at descending).
+ * @param records - per-request records in the range.
+ * @returns records sorted by commit time descending.
+ */
+export function requestLogRows(records: readonly RequestRecord[]): RequestRecord[] {
+  return [...records].sort((a, b) => b.t - a.t)
+}
+
+/**
+ * CC Switch's compact token count. Chinese locale renders 万/亿 magnitudes;
+ * the default renders K/M/B. `decimals` is 1 for card sub-figures and 2 for
+ * the hero's precise chip.
+ * @param value - token count.
+ * @param zh - whether the active locale renders Chinese magnitudes.
+ * @param decimals - fractional digits on the magnitude.
+ * @returns the compact display string, `0` for non-positive values.
+ */
+export function formatTokensShort(value: number, zh: boolean, decimals: 1 | 2 = 1): string {
+  if (!Number.isFinite(value) || value <= 0) return '0'
+  if (zh) {
+    if (value >= 1e8) return `${(value / 1e8).toFixed(2)} 亿`
+    if (value >= 1e4) return `${(value / 1e4).toFixed(decimals)} 万`
+    return value.toLocaleString()
+  }
+  if (value >= 1e9) return `${(value / 1e9).toFixed(2)}B`
+  if (value >= 1e6) return `${(value / 1e6).toFixed(2)}M`
+  if (value >= 1e3) return `${(value / 1e3).toFixed(decimals)}K`
+  return value.toLocaleString()
+}
+
+/**
+ * Fixed-decimal cost for the CC Switch tables: totals render four decimals,
+ * per-request averages six.
+ * @param value - cost in CNY.
+ * @param digits - fractional digits.
+ * @returns the ¥-prefixed string, `¥--` for non-finite values.
+ */
+export function formatCostExact(value: number, digits: number): string {
+  const n = Number(value)
+  return Number.isFinite(n) ? `¥${n.toFixed(digits)}` : '¥--'
 }
 
 /**

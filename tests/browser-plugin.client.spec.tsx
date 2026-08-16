@@ -79,11 +79,8 @@ describe('ui-token-viewer browser plugin', () => {
     await b.fiber.await()
     const cardFace = b.headerEntry()?.inject?.() as { openSession?: (id: unknown) => void } | undefined
     expect(typeof cardFace?.openSession).toBe('function')
-    const drawerFace = b.overlayEntry()?.inject?.() as { openSession?: (id: unknown) => void; getDefaultModel?: () => string } | undefined
+    const drawerFace = b.overlayEntry()?.inject?.() as { openSession?: (id: unknown) => void } | undefined
     expect(typeof drawerFace?.openSession).toBe('function')
-    expect(typeof drawerFace?.getDefaultModel).toBe('function')
-    // SettingsScope is unexposed in the bench, so the model falls back.
-    expect(drawerFace?.getDefaultModel?.()).toBe('deepseek-v4-flash')
   })
 })
 

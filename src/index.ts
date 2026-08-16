@@ -85,6 +85,63 @@ const modelUsageSchema = z.object({
 })
 
 /**
+ * One per-request usage record in the usageLog projection, in CC Switch's
+ * request-log shape. Field names are compact because the array grows with
+ * every billed assistant step: `t` commit time (event.time, epoch ms), `m`
+ * model, `i` fresh (uncached) input, `o` output, `r` cache read, `w` cache
+ * write.
+ */
+export interface UsageLogEntry {
+  t: number
+  m: string
+  i: number
+  o: number
+  r: number
+  w: number
+}
+
+/** State of the usageLog projection: one entry per reported assistant step. */
+interface UsageLogState {
+  entries: UsageLogEntry[]
+}
+
+/** Wire schema for the usageLog projection value. */
+const usageLogSchema = z.object({
+  entries: z.array(z.object({
+    t: z.number(),
+    m: z.string(),
+    i: z.number().int().nonnegative(),
+    o: z.number().int().nonnegative(),
+    r: z.number().int().nonnegative(),
+    w: z.number().int().nonnegative(),
+  })),
+})
+
+/**
+ * Fold one committed event into the per-request usage log. Mirrors
+ * modelUsage's admission rule (assistant steps carrying provider usage and a
+ * model) but keeps every record separately with its commit timestamp, so the
+ * browser half can bucket by true request time — the CC Switch statistics
+ * method — instead of by session last-activity.
+ * @param state - the state covering all prior events.
+ * @param event - one committed session event.
+ * @returns the next state (unchanged reference for uninterested events).
+ */
+function usageLogApply(state: UsageLogState, event: SessionEvent): UsageLogState {
+  if (event.type !== 'assistant/message') return state
+  const usage = event.data.usage
+  if (usage === undefined) return state
+  const model = event.data.message.source?.model
+  if (model === undefined || model === '') return state
+  const r = usage.cacheReadTokens ?? 0
+  const w = usage.cacheWriteTokens ?? 0
+  if (usage.inputTokens + usage.outputTokens + r + w <= 0) return state
+  return {
+    entries: [...state.entries, { t: event.time, m: model, i: usage.inputTokens, o: usage.outputTokens, r, w }],
+  }
+}
+
+/**
  * Fold one committed event into the per-model usage state. Only
  * `assistant/message` events with provider usage attribute their buckets to
  * the message's model (`message.source.model`) — the same authoritative
@@ -118,8 +175,10 @@ function modelUsageApply(state: ModelUsageState, event: SessionEvent): ModelUsag
 }
 
 /**
- * Register the modelUsage session projection: per-model consumption for the
- * model-statistics table. The projection registry is provided by the host.
+ * Register the modelUsage and usageLog session projections: cumulative
+ * per-model consumption for the sidebar's fallback row, and the per-request
+ * usage log the detail panel's CC Switch-style statistics aggregate. The
+ * projection registry is provided by the host.
  * @param ctx - host context carrying the sessionProjections service.
  */
 function installModelUsageProjection(ctx: Context): void {
@@ -130,6 +189,14 @@ function installModelUsageProjection(ctx: Context): void {
       init: (): ModelUsageState => ({ byModel: {} }),
       apply: modelUsageApply,
       view: (state: ModelUsageState): ModelUsageState => state,
+      stateVersion: 1,
+    })
+    projectionCtx.sessionProjections.register({
+      key: 'usageLog',
+      schema: usageLogSchema,
+      init: (): UsageLogState => ({ entries: [] }),
+      apply: usageLogApply,
+      view: (state: UsageLogState): UsageLogState => state,
       stateVersion: 1,
     })
   })
