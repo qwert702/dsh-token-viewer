@@ -23,7 +23,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-token-meter/client'
 import { useBalance } from './balance.ts'
 import {
-  derivePerModel, derivePerSession, derivePerWorkspace, deriveSidebarTotals, deriveUsageTrend, formatCost,
+  currencySymbol, derivePerModel, derivePerSession, derivePerWorkspace, deriveSidebarTotals, deriveUsageTrend, formatCost,
   formatMoney, formatTokens, rangeSinceMs, type UsageRange,
 } from './derive.ts'
 import type { TokenDetailStore } from './token-detail-store.ts'
@@ -113,7 +113,7 @@ export function TokenDetailPanel({ useStore, useSessions, useWorkspaces, actions
             <HeroCard label={t('cost')} value={formatCost(cost)} accent />
             <HeroCard label={t('cacheHit')} value={cacheHit === null ? '—' : `${cacheHit}%`} />
             <HeroCard label={t('sessions')} value={String(perSession.length)} />
-            {balanceOk && <HeroCard label={t('balance')} value={`¥${formatMoney(balance.state.balance.totalBalance)}`} />}
+            {balanceOk && <HeroCard label={t('balance')} value={`${currencySymbol(balance.state.balance.currency)}${formatMoney(balance.state.balance.totalBalance)}`} />}
           </div>
 
           <section className={css.section}>

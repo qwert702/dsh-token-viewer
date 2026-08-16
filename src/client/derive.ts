@@ -85,6 +85,8 @@ export interface TokenDockView {
   cacheHit: number | null
   /** Context occupancy, or null until both numerator and capacity are known. */
   occupancy: ContextOccupancy | null
+  /** Context-breakdown projection value, reserved for tooltip detail. */
+  breakdown?: ContextBreakdownProjection | null
 }
 
 /**
@@ -204,7 +206,7 @@ export function derivePerSession(byId: Readonly<Record<SessionId, SessionSummary
 
 /** DeepSeek per-million-token prices in CNY (provider list price for v4-flash). */
 export interface TokenPrices {
-  /** Uncached + cache-write input price per 1M tokens. */
+  /** Uncached input price per 1M tokens. */
   inputPerM: number
   outputPerM: number
   /** Cache-hit (read) price per 1M tokens. */
@@ -221,15 +223,16 @@ export const DEFAULT_TOKEN_PRICES: TokenPrices = {
 }
 
 /**
- * Estimate cost (CNY) from one usage bucket under the given prices. Cache
- * writes bill at their own price (defaults to the input price, matching
- * DeepSeek's list pricing for cache misses).
+ * Estimate cost (CNY) from one usage bucket under the given prices. Each
+ * bucket bills exactly once: cache writes at their own price (defaults to the
+ * input price, matching DeepSeek's list pricing for cache misses), not again
+ * at the uncached input price.
  * @param usage - a token-usage projection value.
  * @param prices - per-million-token prices (defaults to DeepSeek v4-flash).
  * @returns estimated cost in CNY.
  */
 export function estimateCost(usage: TokenUsageProjection, prices: TokenPrices = DEFAULT_TOKEN_PRICES): number {
-  return (usage.uncachedInputTokens + usage.cacheWriteTokens) / 1e6 * prices.inputPerM
+  return usage.uncachedInputTokens / 1e6 * prices.inputPerM
     + usage.outputTokens / 1e6 * prices.outputPerM
     + usage.cacheReadTokens / 1e6 * prices.cacheReadPerM
     + usage.cacheWriteTokens / 1e6 * prices.cacheWritePerM

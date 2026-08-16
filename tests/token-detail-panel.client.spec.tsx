@@ -145,14 +145,14 @@ describe('TokenDetailPanel', () => {
 })
 
 describe('usage statistics helpers', () => {
-  it('estimateCost prices each bucket under the default DeepSeek prices', () => {
+  it('estimateCost prices each bucket once under the default DeepSeek prices', () => {
     const usage = { uncachedInputTokens: 1000000, outputTokens: 500000, cacheReadTokens: 1000000, cacheWriteTokens: 1000000 }
-    const expected = (1000000 + 1000000) / 1e6 * DEFAULT_TOKEN_PRICES.inputPerM
+    const expected = 1000000 / 1e6 * DEFAULT_TOKEN_PRICES.inputPerM
       + 500000 / 1e6 * DEFAULT_TOKEN_PRICES.outputPerM
       + 1000000 / 1e6 * DEFAULT_TOKEN_PRICES.cacheReadPerM
       + 1000000 / 1e6 * DEFAULT_TOKEN_PRICES.cacheWritePerM
     expect(estimateCost(usage)).toBeCloseTo(expected)
-    expect(estimateCost(usage, { inputPerM: 2, outputPerM: 4, cacheReadPerM: 0.5, cacheWritePerM: 2 })).toBeCloseTo(8.5)
+    expect(estimateCost(usage, { inputPerM: 2, outputPerM: 4, cacheReadPerM: 0.5, cacheWritePerM: 2 })).toBeCloseTo(6.5)
   })
 
   it('formatCost renders ¥ with two decimals at and above a cent', () => {
