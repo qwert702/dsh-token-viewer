@@ -43,7 +43,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 const NS = 'tokenViewer'
 
 /** Required services for the token dock and sidebar card. */
-export const inject = ['slots', 'locale', 'sessions']
+export const inject = ['slots', 'locale', 'sessions', 'settingsScope']
 
 /**
  * Client plugin body: the dock strip, the sidebar header card, and the
@@ -58,6 +58,16 @@ export function apply(ctx: ClientContext): void {
 
   const openSession = (sessionId: SessionId): void => { ctx.sessions.open(sessionId) }
   const tokenDetailStore = createTokenDetailStore()
+
+  // Deployment default model for the model-stats table: the harness's
+  // agent-default-model settings namespace, falling back to the DeepSeek
+  // v4-flash list name when the namespace is not exposed to this client.
+  const modelScope = ctx.settingsScope.bind({ namespace: 'agent-default-model' })
+  const getDefaultModel = (): string => {
+    const snapshot = modelScope.getSnapshot()
+    const model = snapshot?.status === 'ready' ? snapshot.value?.model : undefined
+    return typeof model === 'string' && model !== '' ? model : 'deepseek-v4-flash'
+  }
 
   ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
     name: 'conversation.input.dock',
@@ -79,6 +89,6 @@ export function apply(ctx: ClientContext): void {
     order: 10,
     locale: NS,
     store: tokenDetailStore,
-    inject: (): TokenDetailPanelInjected => ({ openSession }),
+    inject: (): TokenDetailPanelInjected => ({ openSession, getDefaultModel }),
   }, TokenDetailPanel))
 }

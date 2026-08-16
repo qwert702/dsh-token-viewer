@@ -2,13 +2,15 @@
  * TokenDetailPanel: the right-side usage statistics drawer opened from the
  * sidebar card, styled after CC Switch's usage page — a time-range filter, a
  * hero row of summary cards (real usage, estimated cost, cache hit rate,
- * session count, balance), a per-workspace (project) statistics table, and a
- * per-conversation log table with time/input/output/cache/cost columns.
- * Clicking a conversation row opens that session and closes the panel.
- * Registered into shell.overlay, renders nothing while closed (click-through),
- * and takes over pointer events only when open. The time range filters by
- * each session's last activity (usage is cumulative, so the numbers are
- * approximate for non-"all" ranges).
+ * session count, balance), an approximate usage-trend bar chart, per-model and
+ * per-workspace (project) statistics tables, and a per-conversation log table
+ * with time/input/output/cache/cost columns. Clicking a conversation row opens
+ * that session and closes the panel. Registered into shell.overlay, renders
+ * nothing while closed (click-through), and takes over pointer events only
+ * when open. The time range and the trend filter by each session's last
+ * activity — the harness projects cumulative totals, not per-request usage,
+ * so the numbers are approximate for non-"all" ranges and the trend is by last
+ * activity; model stats attribute all usage to the deployment default model.
  */
 import { useMemo, useState } from 'react'
 import type { PropsLocale, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
@@ -19,15 +21,17 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-token-meter/client'
 import { useBalance } from './balance.ts'
 import {
-  derivePerSession, derivePerWorkspace, deriveSidebarTotals, formatCost, formatMoney, formatTokens,
-  rangeSinceMs, type UsageRange,
+  derivePerSession, derivePerWorkspace, deriveSidebarTotals, deriveUsageTrend, formatCost,
+  formatMoney, formatTokens, rangeSinceMs, type UsageRange,
 } from './derive.ts'
 import type { TokenDetailStore } from './token-detail-store.ts'
 import css from './TokenDetailPanel.module.css'
 
-/** Business face injected by the client plugin body: open a session by id. */
+/** Business face injected by the client plugin body: open a session by id, and the default model label. */
 export interface TokenDetailPanelInjected {
   openSession: (sessionId: SessionId) => void
+  /** Deployment default model name (all usage is attributed to it). */
+  getDefaultModel: () => string
 }
 
 /** Full props of the detail panel: global seat + shared store + open verb + locale. */
@@ -58,7 +62,7 @@ function HeroCard({ label, value, accent }: { label: string; value: string; acce
  * @param props - global seat, shared open store, session-open verb, locale.
  * @returns the drawer, or nothing while closed.
  */
-export function TokenDetailPanel({ useStore, useSessions, useWorkspaces, actions, t, openSession }: TokenDetailPanelProps) {
+export function TokenDetailPanel({ useStore, useSessions, useWorkspaces, actions, t, openSession, getDefaultModel }: TokenDetailPanelProps) {
   const open = useStore((state) => state.open)
   const byId = useSessions((state) => state.byId)
   const workspaceItems = useWorkspaces((state) => state.items)
@@ -68,6 +72,8 @@ export function TokenDetailPanel({ useStore, useSessions, useWorkspaces, actions
   const totals = useMemo(() => deriveSidebarTotals(byId, sinceMs), [byId, sinceMs])
   const perWorkspace = useMemo(() => derivePerWorkspace(workspaceItems, byId, sinceMs), [workspaceItems, byId, sinceMs])
   const perSession = useMemo(() => derivePerSession(byId, sinceMs), [byId, sinceMs])
+  const trend = useMemo(() => deriveUsageTrend(byId, range), [byId, range])
+  const trendMax = useMemo(() => Math.max(1, ...trend.map((p) => p.input + p.output + p.cacheRead)), [trend])
   if (!open) return null
   const input = totals.uncached + totals.cacheRead + totals.cacheWrite
   const cacheHit = input > 0 ? Math.round((totals.cacheRead / input) * 100) : null
@@ -106,6 +112,53 @@ export function TokenDetailPanel({ useStore, useSessions, useWorkspaces, actions
             <HeroCard label={t('sessions')} value={String(perSession.length)} />
             {balanceOk && <HeroCard label={t('balance')} value={`¥${formatMoney(balance.state.balance.totalBalance)}`} />}
           </div>
+
+          <section className={css.section}>
+            <div className={css.sectionTitle}>
+              {t('trend')} <span className={css.sectionHint}>{t('trendApprox')}</span>
+            </div>
+            <div className={css.legend}>
+              <span className={css.legendItem}><i className={css.swatchInput} />{t('input')}</span>
+              <span className={css.legendItem}><i className={css.swatchOutput} />{t('output')}</span>
+              <span className={css.legendItem}><i className={css.swatchCache} />{t('cacheRead')}</span>
+            </div>
+            <div className={css.chart}>
+              {trend.map((p) => (
+                <div
+                  key={p.key}
+                  className={css.chartCol}
+                  title={`${p.label}: ${t('input')} ${formatTokens(p.input)} · ${t('output')} ${formatTokens(p.output)} · ${t('cacheRead')} ${formatTokens(p.cacheRead)}`}
+                >
+                  <div className={css.chartBars}>
+                    <div className={css.barCache} style={{ height: `${(p.cacheRead / trendMax) * 100}%` }} />
+                    <div className={css.barOutput} style={{ height: `${(p.output / trendMax) * 100}%` }} />
+                    <div className={css.barInput} style={{ height: `${(p.input / trendMax) * 100}%` }} />
+                  </div>
+                  <span className={css.chartLabel}>{p.label}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className={css.section}>
+            <div className={css.sectionTitle}>{t('modelStats')}</div>
+            <div className={css.table}>
+              <div className={css.tableHead}>
+                <span className={css.colModel}>{t('model')}</span>
+                <span className={css.colNum}>{t('sessions')}</span>
+                <span className={css.colNum}>{t('input')}</span>
+                <span className={css.colNum}>{t('output')}</span>
+                <span className={css.colNum}>{t('cost')}</span>
+              </div>
+              <div className={css.tableRow}>
+                <span className={css.colModel} title={getDefaultModel()}>{getDefaultModel()}</span>
+                <span className={css.colNum}>{totals.sessions}</span>
+                <span className={css.colNum}>{formatTokens(input)}</span>
+                <span className={css.colNum}>{formatTokens(totals.output)}</span>
+                <span className={css.colNum}>{formatCost(cost)}</span>
+              </div>
+            </div>
+          </section>
 
           <section className={css.section}>
             <div className={css.sectionTitle}>{t('byProject')}</div>

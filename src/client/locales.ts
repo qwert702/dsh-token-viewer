@@ -31,6 +31,10 @@ export const zh = {
   'last7d': '近7天',
   'all': '全部',
   'time': '时间',
+  'trend': '使用趋势',
+  'trendApprox': '按会话最后活跃时间（近似）',
+  'modelStats': '模型统计',
+  'model': '模型',
 } satisfies Record<string, string>
 
 /** The tokenViewer namespace key union. */
@@ -67,4 +71,8 @@ export const en = {
   'last7d': 'Last 7 days',
   'all': 'All',
   'time': 'Time',
+  'trend': 'Usage trend',
+  'trendApprox': 'by last activity (approx)',
+  'modelStats': 'Model stats',
+  'model': 'Model',
 } satisfies Record<TokenKey, string>

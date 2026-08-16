@@ -15,8 +15,8 @@ import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts
 import type { SessionId, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
 import { TokenDetailPanel } from '../src/client/TokenDetailPanel.tsx'
 import {
-  DEFAULT_TOKEN_PRICES, derivePerSession, derivePerWorkspace, deriveSidebarTotals,
-  estimateCost, formatCost, rangeSinceMs,
+  DEFAULT_TOKEN_PRICES, derivePerSession, derivePerWorkspace, deriveSidebarTotals, deriveUsageTrend,
+  estimateCost, formatCost, rangeSinceMs, trendBucketMs,
 } from '../src/client/derive.ts'
 import { zh } from '../src/client/locales.ts'
 
@@ -49,6 +49,7 @@ function panelProps(over: { open?: boolean; byId?: Record<string, SessionSummary
   const props = {
     t,
     openSession,
+    getDefaultModel: () => 'deepseek-v4-flash',
     useStore: (sel: (s: { open: boolean }) => unknown) => sel({ open: over.open ?? true }),
     useSessions: (sel: (s: { byId: Record<string, SessionSummary | undefined> }) => unknown) => sel({ byId: over.byId ?? {} }),
     useWorkspaces: (sel: (s: { items: unknown[] }) => unknown) => sel({ items: over.items ?? [] }),
@@ -81,12 +82,15 @@ describe('TokenDetailPanel', () => {
     expect(view.container.firstChild).toBeNull()
   })
 
-  it('shows hero cards, project statistics, and the conversation log when open', () => {
+  it('shows hero cards, trend, model stats, project statistics, and the conversation log when open', () => {
     stubBalanceOk()
     render(<TokenDetailPanel {...panelProps({ byId: fullById, items: workspaceItems })} />)
     expect(screen.getByText('真实消耗')).toBeTruthy()
     expect(screen.getByText('估算费用')).toBeTruthy()
     expect(screen.getByText('缓存命中率')).toBeTruthy()
+    expect(screen.getByText('使用趋势')).toBeTruthy()
+    expect(screen.getByText('模型统计')).toBeTruthy()
+    expect(screen.getByText('deepseek-v4-flash')).toBeTruthy()
     expect(screen.getByText('按项目')).toBeTruthy()
     expect(screen.getByText('项目A')).toBeTruthy()
     expect(screen.getByText('项目B')).toBeTruthy()
@@ -172,5 +176,29 @@ describe('usage statistics helpers', () => {
     const rows = derivePerWorkspace(workspaceItems, stale, rangeSinceMs('7d'))
     expect(rows.find((r) => r.id === 'w1')).toBeUndefined()
     expect(rows.find((r) => r.id === 'w2')).toMatchObject({ input: 2900, output: 500 })
+  })
+
+  it('trendBucketMs is hourly for today and daily otherwise', () => {
+    expect(trendBucketMs('today')).toBe(60 * 60 * 1000)
+    expect(trendBucketMs('7d')).toBe(24 * 60 * 60 * 1000)
+    expect(trendBucketMs('all')).toBe(24 * 60 * 60 * 1000)
+  })
+
+  it('deriveUsageTrend buckets sessions by last activity and sums buckets', () => {
+    const dayStart = new Date()
+    dayStart.setHours(0, 0, 0, 0)
+    const ds = dayStart.getTime()
+    const hour = 60 * 60 * 1000
+    const byId: Record<string, SessionSummary | undefined> = {
+      a: makeSummary('a', usageA, ds + 10 * hour),
+      b: makeSummary('b', usageB, ds + 11 * hour),
+    }
+    const hourly = deriveUsageTrend(byId, 'today')
+    expect(hourly).toHaveLength(2)
+    const newest = hourly[hourly.length - 1]
+    expect(newest).toMatchObject({ input: usageB.uncached + usageB.cacheWrite, output: usageB.output, cacheRead: usageB.cacheRead })
+    const daily = deriveUsageTrend(byId, '7d')
+    expect(daily).toHaveLength(1)
+    expect(daily[0]).toMatchObject({ input: usageA.uncached + usageA.cacheWrite + usageB.uncached + usageB.cacheWrite })
   })
 })

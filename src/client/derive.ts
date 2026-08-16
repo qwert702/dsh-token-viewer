@@ -266,6 +266,61 @@ export function rangeSinceMs(range: UsageRange): number {
   return 0
 }
 
+/** One bucket of the usage-trend chart. */
+export interface TrendPoint {
+  /** Bucket label: `HH:00` for hourly, `M/D` for daily. */
+  label: string
+  /** Bucket key (epoch ms of the bucket start) for hover grouping. */
+  key: number
+  input: number
+  output: number
+  cacheRead: number
+}
+
+/** Bucket size for a range: hourly for today, daily otherwise. */
+export function trendBucketMs(range: UsageRange): number {
+  return range === 'today' ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000
+}
+
+/**
+ * Approximate usage trend: each session's cumulative usage is bucketed by its
+ * last activity time (the harness projects cumulative totals, not per-request
+ * usage, so the trend is by last activity — see the panel's note).
+ * @param byId - SessionListState.byId snapshot.
+ * @param range - selected range (today = hourly, 7d/all = daily).
+ * @returns ordered trend points for the range's buckets with any usage.
+ */
+export function deriveUsageTrend(byId: Readonly<Record<SessionId, SessionSummary | undefined>>, range: UsageRange): TrendPoint[] {
+  const sinceMs = rangeSinceMs(range)
+  const bucketMs = trendBucketMs(range)
+  const buckets = new Map<number, TrendPoint>()
+  const now = Date.now()
+  const hourLabel = (ts: number): string => `${new Date(ts).getHours()}:00`
+  const dayLabel = (ts: number): string => {
+    const d = new Date(ts)
+    return `${d.getMonth() + 1}/${d.getDate()}`
+  }
+  const labelOf = (ts: number): string => (range === 'today' ? hourLabel(ts) : dayLabel(ts))
+  for (const key of Object.keys(byId)) {
+    const summary = byId[key as SessionId]
+    if (summary === undefined) continue
+    if (sinceMs > 0 && summary.updatedAt < sinceMs) continue
+    const usage = summary.projectionValues?.tokenUsage
+    if (usage === undefined || usage === null) continue
+    if (usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens + usage.outputTokens <= 0) continue
+    const ts = Math.min(summary.updatedAt, now)
+    const bucketStart = Math.floor(ts / bucketMs) * bucketMs
+    const point = buckets.get(bucketStart) ?? { label: labelOf(bucketStart), key: bucketStart, input: 0, output: 0, cacheRead: 0 }
+    point.input += usage.uncachedInputTokens + usage.cacheWriteTokens
+    point.output += usage.outputTokens
+    point.cacheRead += usage.cacheReadTokens
+    buckets.set(bucketStart, point)
+  }
+  const points = [...buckets.values()]
+  points.sort((a, b) => a.key - b.key)
+  return points
+}
+
 /**
  * Currency symbol for the balance row; falls back to the ISO code.
  * @param currency - ISO 4217 code from the provider.
