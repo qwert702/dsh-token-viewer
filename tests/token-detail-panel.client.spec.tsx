@@ -15,8 +15,8 @@ import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts
 import type { SessionId, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
 import { TokenDetailPanel } from '../src/client/TokenDetailPanel.tsx'
 import {
-  DEFAULT_TOKEN_PRICES, collectRequestRecords, estimateCost, formatCost, formatCostExact, formatTokensShort,
-  modelStats, projectStats, requestLogRows, resolveUsageRange, usageSummary, usageTrend,
+  DEFAULT_TOKEN_PRICES, collectRequestRecords, estimateCost, estimateRequestCost, formatCost, formatCostExact, formatTokensShort,
+  isPeakHour, modelStats, pricesForModel, projectStats, requestLogRows, resolveUsageRange, usageSummary, usageTrend,
   type UsageLogEntry,
 } from '../src/client/derive.ts'
 import { zh } from '../src/client/locales.ts'
@@ -140,7 +140,7 @@ describe('TokenDetailPanel', () => {
 })
 
 describe('CC Switch statistics helpers', () => {
-  it('estimateCost prices each bucket once under the default DeepSeek prices', () => {
+  it('estimateCost prices each bucket once under the default V4-Flash off-peak prices', () => {
     const usage = { uncachedInputTokens: 1000000, outputTokens: 500000, cacheReadTokens: 1000000, cacheWriteTokens: 1000000 }
     const expected = 1000000 / 1e6 * DEFAULT_TOKEN_PRICES.inputPerM
       + 500000 / 1e6 * DEFAULT_TOKEN_PRICES.outputPerM
@@ -148,6 +148,24 @@ describe('CC Switch statistics helpers', () => {
       + 1000000 / 1e6 * DEFAULT_TOKEN_PRICES.cacheWritePerM
     expect(estimateCost(usage)).toBeCloseTo(expected)
     expect(estimateCost(usage, { inputPerM: 2, outputPerM: 4, cacheReadPerM: 0.5, cacheWritePerM: 2 })).toBeCloseTo(6.5)
+  })
+
+  it('prices requests per model with Beijing peak/off-peak tiers', () => {
+    // 2026-08-17 07:00 UTC = 15:00 Beijing (peak); 13:00 UTC = 21:00 Beijing (off-peak).
+    const peak = Date.UTC(2026, 7, 17, 7, 0)
+    const offPeak = Date.UTC(2026, 7, 17, 13, 0)
+    expect(isPeakHour(peak)).toBe(true)
+    expect(isPeakHour(offPeak)).toBe(false)
+    expect(pricesForModel('deepseek-v4-flash', offPeak)).toEqual(DEFAULT_TOKEN_PRICES)
+    expect(pricesForModel('deepseek-v4-flash', peak).inputPerM).toBe(DEFAULT_TOKEN_PRICES.inputPerM * 2)
+    expect(pricesForModel('deepseek-v4-pro', offPeak).outputPerM).toBe(13.5)
+    // versioned ids resolve through the longest matching key; unknown ids fall back
+    expect(pricesForModel('deepseek-v4-flash-0731', offPeak)).toEqual(DEFAULT_TOKEN_PRICES)
+    expect(pricesForModel('some-other-model', peak)).toEqual(DEFAULT_TOKEN_PRICES)
+    const usage = { uncachedInputTokens: 1000000, outputTokens: 1000000, cacheReadTokens: 0, cacheWriteTokens: 0 }
+    expect(estimateRequestCost(usage, 'deepseek-v4-flash', offPeak)).toBeCloseTo(1.5 + 4.5)
+    expect(estimateRequestCost(usage, 'deepseek-v4-flash', peak)).toBeCloseTo(3 + 9)
+    expect(estimateRequestCost(usage, 'deepseek-v4-pro', offPeak)).toBeCloseTo(4.5 + 13.5)
   })
 
   it('formatCost renders ¥ with two decimals at and above a cent', () => {
@@ -180,8 +198,11 @@ describe('CC Switch statistics helpers', () => {
     const records = collectRequestRecords(loggedById, 'all', NOW)
     expect(records).toHaveLength(3)
     expect(records[0]).toMatchObject({ sessionId: sid('a'), sessionTitle: '会话A', model: 'deepseek-v4-flash', i: 1200, o: 3450, r: 11000, w: 300 })
-    // per-record cost is the four-bucket estimate
-    expect(records[1].cost).toBeCloseTo(3.2)
+    // per-record cost bills under the record's own model at its commit time
+    expect(records[1].cost).toBeCloseTo(estimateRequestCost(
+      { uncachedInputTokens: entryA2.i, outputTokens: entryA2.o, cacheReadTokens: entryA2.r, cacheWriteTokens: entryA2.w },
+      entryA2.m, entryA2.t,
+    ))
     const legacy: Record<string, SessionSummary | undefined> = {
       c: {
         id: sid('c'),

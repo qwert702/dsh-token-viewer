@@ -21,6 +21,6 @@ Token 消耗展示插件：只读界面，数据来自 host 侧已算好的 toke
 ## 已知限制与暂缓事项
 
 - **启发式近似，仅限 dock 与侧栏**——停靠条与侧栏卡的缓存命中率、上下文占用率继承 token-meter 固定的「4 字符 ≈ 1 token」密度估计（凡提供方未计费的内容都按此计价）；CJK 文本与 JSON schema 会被系统性低估。统计面板的 CC Switch 口径折叠的是提供方逐条上报的请求用量，对 `usageLog` 投影覆盖的会话是精确值（仅早于该投影的旧会话回退为合成近似）。占用率是面向用户的参考数字，不是计费或门控输入（见 token-meter README）。
-- **费用为单一牌价估算**——CC Switch 四桶计费器对全部模型采用 DeepSeek v4-flash 人民币默认牌价；按模型定价表（CC Switch 的 `models.dev` 同步）暂缓。
+- **按模型分档计价**——每条请求按其模型与提交时间计费：V4-Flash / V4-Pro 各自的官方牌价（人民币/百万 tokens，缓存写按缓存未命中价），并区分北京时段高峰（9–12 点、14–18 点，牌价翻倍）与空闲；未知模型回退 V4-Flash 空闲价。牌价硬编码在 `MODEL_PRICING` 表中，提供方调价时需同步。
 - **余额为 DeepSeek 专属**——host 路由调用 DeepSeek 的 `/user/balance`；其他提供方不在覆盖范围，多币种响应只展示 `balance_infos` 首项。
 - **侧边栏卡片依赖 ui-sidebar 的 header 插槽**——只有外壳声明 `sidebar.workspaces.header` 时才渲染；若组合层替换了不带该插槽的 ui-sidebar，卡片会静默消失，而 dock 条仍正常。

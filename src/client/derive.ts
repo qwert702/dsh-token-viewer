@@ -189,6 +189,16 @@ export function derivePerSession(byId: Readonly<Record<SessionId, SessionSummary
     const input = usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
     const output = usage.outputTokens
     if (input <= 0 && output <= 0) continue
+    // Cost: per-model buckets priced at their own model's rate when the
+    // session reports them, else the default table over the cumulative total.
+    let cost = estimateCost(usage)
+    const byModel = summary.projectionValues?.modelUsage?.byModel
+    if (byModel !== undefined && Object.keys(byModel).length > 0) {
+      cost = 0
+      for (const [model, buckets] of Object.entries(byModel)) {
+        cost += estimateRequestCost(buckets, model, summary.updatedAt)
+      }
+    }
     rows.push({
       id: summary.id,
       title: summary.displayTitle,
@@ -196,7 +206,7 @@ export function derivePerSession(byId: Readonly<Record<SessionId, SessionSummary
       output,
       cacheRead: usage.cacheReadTokens,
       total: input + output,
-      cost: estimateCost(usage),
+      cost,
       updatedAt: summary.updatedAt,
     })
   }
@@ -214,21 +224,21 @@ export interface TokenPrices {
   cacheWritePerM: number
 }
 
-/** Default prices: DeepSeek v4-flash, CNY per 1M tokens. */
+/** Default prices: DeepSeek V4-Flash off-peak list price, CNY per 1M tokens. */
 export const DEFAULT_TOKEN_PRICES: TokenPrices = {
-  inputPerM: 1,
-  outputPerM: 2,
-  cacheReadPerM: 0.2,
-  cacheWritePerM: 1,
+  inputPerM: 1.5,
+  outputPerM: 4.5,
+  cacheReadPerM: 0.05,
+  cacheWritePerM: 1.5,
 }
 
 /**
  * Estimate cost (CNY) from one usage bucket under the given prices. Each
- * bucket bills exactly once: cache writes at their own price (defaults to the
- * input price, matching DeepSeek's list pricing for cache misses), not again
- * at the uncached input price.
+ * bucket bills exactly once: cache writes bill at their own price (the
+ * cache-miss rate, matching DeepSeek's list pricing), not again at the
+ * uncached input price.
  * @param usage - a token-usage projection value.
- * @param prices - per-million-token prices (defaults to DeepSeek v4-flash).
+ * @param prices - per-million-token prices (defaults to V4-Flash off-peak).
  * @returns estimated cost in CNY.
  */
 export function estimateCost(usage: TokenUsageProjection, prices: TokenPrices = DEFAULT_TOKEN_PRICES): number {
@@ -236,6 +246,71 @@ export function estimateCost(usage: TokenUsageProjection, prices: TokenPrices = 
     + usage.outputTokens / 1e6 * prices.outputPerM
     + usage.cacheReadTokens / 1e6 * prices.cacheReadPerM
     + usage.cacheWriteTokens / 1e6 * prices.cacheWritePerM
+}
+
+/** Peak/off-peak price tiers for one model, CNY per 1M tokens. */
+export interface ModelPricing {
+  /** Off-peak (standard) prices. */
+  offPeak: TokenPrices
+  /** Peak-hour prices (Beijing 09:00–12:00 and 14:00–18:00). */
+  peak: TokenPrices
+}
+
+/**
+ * Per-model list prices from the provider's pricing page (V4-Flash-0731 and
+ * V4-Pro-0813, CNY per 1M tokens; peak is double the off-peak rate).
+ * Cache writes bill at the cache-miss (uncached input) rate.
+ */
+export const MODEL_PRICING: Readonly<Record<string, ModelPricing>> = {
+  'deepseek-v4-flash': {
+    offPeak: { inputPerM: 1.5, outputPerM: 4.5, cacheReadPerM: 0.05, cacheWritePerM: 1.5 },
+    peak: { inputPerM: 3, outputPerM: 9, cacheReadPerM: 0.1, cacheWritePerM: 3 },
+  },
+  'deepseek-v4-pro': {
+    offPeak: { inputPerM: 4.5, outputPerM: 13.5, cacheReadPerM: 0.15, cacheWritePerM: 4.5 },
+    peak: { inputPerM: 9, outputPerM: 27, cacheReadPerM: 0.3, cacheWritePerM: 9 },
+  },
+}
+
+/**
+ * Whether a timestamp falls in the provider's peak window — Beijing time
+ * 09:00–12:00 and 14:00–18:00, converted explicitly so hosts in other
+ * timezones price correctly.
+ * @param t - epoch ms.
+ * @returns true inside a peak window.
+ */
+export function isPeakHour(t: number): boolean {
+  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', hourCycle: 'h23', hour: 'numeric' }).format(new Date(t)))
+  return (hour >= 9 && hour < 12) || (hour >= 14 && hour < 18)
+}
+
+/**
+ * Resolve the price table for one request: exact model id first, then the
+ * longest table key the id starts with (versioned ids like
+ * `deepseek-v4-flash-0731`), then the V4-Flash off-peak default.
+ * @param model - the request's model id.
+ * @param t - the request's commit time, selecting the peak or off-peak tier.
+ * @returns the per-million-token prices to bill under.
+ */
+export function pricesForModel(model: string, t: number): TokenPrices {
+  const key = model in MODEL_PRICING ? model
+    : Object.keys(MODEL_PRICING)
+      .filter((candidate) => model.startsWith(candidate))
+      .sort((a, b) => b.length - a.length)[0]
+  if (key === undefined) return DEFAULT_TOKEN_PRICES
+  return isPeakHour(t) ? MODEL_PRICING[key].peak : MODEL_PRICING[key].offPeak
+}
+
+/**
+ * Estimate one request's cost under its own model's peak/off-peak list
+ * price — the per-model refinement of the four-bucket calculator.
+ * @param usage - the request's token buckets.
+ * @param model - the request's model id.
+ * @param t - the request's commit time.
+ * @returns estimated cost in CNY.
+ */
+export function estimateRequestCost(usage: TokenUsageProjection, model: string, t: number): number {
+  return estimateCost(usage, pricesForModel(model, t))
 }
 
 /**
@@ -368,7 +443,7 @@ export function collectRequestRecords(
       o: entry.o,
       r: entry.r,
       w: entry.w,
-      cost: estimateCost({ uncachedInputTokens: entry.i, outputTokens: entry.o, cacheReadTokens: entry.r, cacheWriteTokens: entry.w }),
+      cost: estimateRequestCost({ uncachedInputTokens: entry.i, outputTokens: entry.o, cacheReadTokens: entry.r, cacheWriteTokens: entry.w }, entry.m, entry.t),
     })
   }
   const logged = summaries.some((summary) => (summary.projectionValues?.usageLog?.entries?.length ?? 0) > 0)
