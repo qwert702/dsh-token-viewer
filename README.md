@@ -23,7 +23,11 @@ CC Switch-style token consumption statistics for the **DeepSeek Harness Web GUI*
 
 ## Screenshots
 
-*(coming soon)*
+![Usage statistics panel overview](docs/panel-overview.png)
+
+![Per-model statistics tab](docs/panel-models.png)
+
+![Per-project statistics tab](docs/panel-projects.png)
 
 ## Repo layout
 

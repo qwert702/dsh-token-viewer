@@ -23,7 +23,11 @@ DeepSeek Harness 网页端 **CC Switch 风格 Token 消耗统计**插件。纯�
 
 ## 截图
 
-*（即将补上）*
+![用量统计面板总览](docs/panel-overview.png)
+
+![按模型统计 Tab](docs/panel-models.png)
+
+![按项目统计 Tab](docs/panel-projects.png)
 
 ## 仓库结构
 
