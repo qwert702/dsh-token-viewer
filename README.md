@@ -1,26 +1,43 @@
-# @deepseek-ai/dsh-client-ui-token-viewer
+# dsh-token-viewer
 
-English | [中文](README.zh.md)
+CC Switch-style token consumption statistics for the **DeepSeek Harness Web GUI**. Read-only surfaces over the harness's host-computed projections plus one balance read; the plugin adds no prompt content, tools, or provider requests.
 
-Token consumption surface plugin: read-only surfaces over the host-computed token-meter session projections (`tokenUsage`, `contextPressure`, `contextBreakdown`) plus a DeepSeek account-balance read. The browser half owns no domain store, refresh chain, or event listener; the node half owns the one host route the balance row fetches.
+> **Install (one command):**
+> ```
+> dsh plugin add qwert702/dsh-token-viewer
+> ```
+> Restart the harness, refresh the web page, then open the **Token 消耗** card in the sidebar → **用量详情**.
 
-- **`TokenDock`** registers at `conversation.input.dock` (order 20, after Goal). It shows what the current session has consumed — billed input (uncached + cache read + cache write), output, cache hit rate, and approximate context occupancy (`projectedTokens / contextWindow`) with a mini progress bar. The hover tooltip carries the full billing breakdown. It renders nothing until a provider reports usage.
-- **`SidebarTokenPanel`** registers at `sidebar.workspaces.header`, a hole declared by ui-sidebar's shell above the workspaces region. It shows the DeepSeek account balance (currency figure with a refresh control; error-retry when the host proxy fails), aggregates `tokenUsage` across every session row's `projectionValues` — billed input, output, cache hit rate, and the number of sessions that reported usage — expands to a per-conversation list (each session's billed input/output, highest total first; clicking a row opens that session), and opens a **right-side usage statistics panel** (`TokenDetailPanel` at `shell.overlay`): a faithful port of **CC Switch's usage-dashboard methodology**, folded from per-request usage records (the `usageLog` projection) rather than cumulative session totals. Range presets resolve exactly like CC Switch (today from local midnight, N-day windows from the midnight of N−1 days back, everything); the hero shows **real consumption** (fresh input + output + cache write + cache read), request count, and total cost, over a five-card breakdown row (fresh input / output / cache write / cache read / cache-hit rate with progress bar); the **trend chart** buckets by each request's own commit time — hourly for the day, daily otherwise, empty buckets zero-filled — with four token series plus a dashed cost line; and three tabs carry the **request log** (every billed request newest first; clicking a row opens that session), **per-project statistics**, and **per-model statistics** with average cost. Cost is the four-bucket estimate (each bucket priced once, CC Switch's Claude-semantics calculator) under the default DeepSeek CNY prices. Sessions from before the `usageLog` projection exist fall back to one synthesized record per session from the cumulative `tokenUsage`, so only that legacy tail stays approximate. It renders nothing until balance or usage is available, and nothing in the collapsed rail (`wide === false`).
-- **Host half** registers `GET /api/billing/balance`: it reads its configuration from the harness **settings namespace** `dsh-token-viewer` (which credential reference and provider base URL to use, defaults `DEEPSEEK_API_KEY` / `https://api.deepseek.com`, editable in `settings.yaml`), resolves the API key through the credentials service (the same secret store the LLM adapter uses), and proxies DeepSeek's `/user/balance`, returning only balance figures — the API key never leaves the server. It also registers the **`modelUsage` session projection** (cumulative per-model buckets for the legacy fallback) and the **`usageLog` session projection**: a pure fold over `assistant/message` events that appends one timestamped record per reported step — commit time (`event.time`), model, and the four token buckets — which the detail panel aggregates with CC Switch's exact statistics method.
+## Features
 
-The `/client` exports are the plugin body (`apply`/`inject`) and the composed props types.
+- **TokenDock** — a slim live strip above the composer showing the current session's billed input (uncached + cache read + cache write), output, cache hit rate, and approximate context occupancy.
+- **Sidebar card** — DeepSeek account balance (with refresh; error-retry when the host proxy fails) and aggregate consumption across all sessions, expandable to a per-conversation list.
+- **Usage statistics panel** (right-side drawer, a faithful port of CC Switch's usage-dashboard method):
+  - **Per-request statistics** — the host `usageLog` projection records one timestamped entry per reported assistant step (commit time, model, four token buckets); every figure folds these records, never cumulative session totals.
+  - **Hero** — real consumption (fresh input + output + cache write + cache read), request count, total cost, over a five-card breakdown row with a cache-hit-rate progress bar.
+  - **Trend chart** — requests bucketed by their own commit time (hourly for the day, daily otherwise, empty buckets zero-filled), four token series plus a dashed cost line.
+  - **Three tabs** — request log (newest first; clicking a row opens that session), per-project statistics, and per-model statistics with average cost.
+  - **Range presets** — today / 7d / 14d / 30d / all, resolved exactly like CC Switch (local midnight of N−1 days back).
+- **Per-model peak/off-peak list pricing** — every request bills under its own model's provider list price (V4-Flash / V4-Pro, CNY per 1M tokens, cache writes at the cache-miss rate), split by the provider's Beijing peak windows (09:00–12:00 and 14:00–18:00, double the off-peak rate); versioned model ids match by prefix, unknown models fall back to the V4-Flash off-peak table. Prices live in `MODEL_PRICING` (see below).
+- **Balance route** — `GET /api/billing/balance` proxies DeepSeek's `/user/balance` through the harness credentials service; the API key never leaves the server.
 
-## Model Experience
+## Screenshots
 
-None. The surfaces are pure presentation over projection values already computed by the host, plus a balance read from the provider's billing endpoint; the plugin adds no prompt content, tools, messages, or provider requests.
+*(coming soon)*
 
-#### KV Cache effect
+## Repo layout
 
-None. The plugin neither assembles nor sends provider requests.
+- `lib/index.js` — plugin host half (balance route + `modelUsage` / `usageLog` session projections), ready to load.
+- `lib/client.js` — browser half bundle (built), discovered via `package.json` `dsh.client`.
+- `scripts/build-client.mjs` — regenerates `lib/client.js` by vendoring the installed `@deepseek-ai/dsh-client-ui-sidebar` bundle (set `DSH_SIDEBAR_BUNDLE` or it probes `~/.dsh/profiles`).
+- `test/smoke.cjs` — `node test/smoke.cjs`: host route + projections + SSR render checks.
 
-## Known Limitations and Deferred Work
+The TypeScript monorepo source (extracted from `deepseek-ai/deepseek-harness`) lives on the `archive/monorepo-src` branch.
 
-- **Heuristic approximations, dock and sidebar only** — the dock strip's and sidebar card's cache hit rate and context occupancy inherit the token-meter's fixed 4-chars-per-token density estimate for any content the provider did not bill; CJK text and JSON schemas are systematically underpriced. The detail panel's CC Switch statistics fold provider-reported per-request usage instead, so its figures are exact for any session the `usageLog` projection has observed (only sessions predating that projection fall back to a synthesized approximation). Occupancy remains a user-facing reference figure, not a billing or gating input (see the token-meter README).
-- **Per-model tiered pricing** — every request bills under its own model's provider list price (V4-Flash / V4-Pro, CNY per 1M tokens, cache writes at the cache-miss rate) split by the provider's Beijing peak windows (09:00–12:00 and 14:00–18:00, double the off-peak rate); unknown models fall back to the V4-Flash off-peak table. Prices are hardcoded in `MODEL_PRICING` and need a sync when the provider reprices.
-- **Balance is DeepSeek-specific** — the host route calls DeepSeek's `/user/balance`; other providers are not covered, and multi-currency responses show only the first `balance_infos` entry.
-- **The sidebar card depends on ui-sidebar's header hole** — it renders only when the shell declares `sidebar.workspaces.header`; a composition that replaces ui-sidebar without that hole silently loses the card while the dock strip keeps working.
+## Model pricing
+
+`MODEL_PRICING` in `lib/client.js` (and `lib/index.js`'s projection fallback) holds the current DeepSeek list prices; the panel also fetches `GET /api/billing/pricing` and prefers the provider's official page when reachable, falling back to the built-in table otherwise.
+
+## License
+
+MIT
