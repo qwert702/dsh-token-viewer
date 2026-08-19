@@ -196,16 +196,16 @@ async function hostTests() {
     const freshPricing = freshRoutes.find((r) => r.path === '/api/billing/pricing');
     if (freshPricing === undefined) throw new Error('fresh pricing route missing');
     const pricingHtml = `
-      <h2>DeepSeek-V4-Flash-0731</h2>
-      <table><tr><th>类别</th><th>空闲时段</th><th>高峰时段</th></tr>
-      <tr><td>输入（缓存命中）</td><td>0.05元</td><td>0.10元</td></tr>
-      <tr><td>输入（缓存未命中）</td><td>1.5元</td><td>3.0元</td></tr>
-      <tr><td>输出</td><td>4.5元</td><td>9.0元</td></tr></table>
-      <h2>DeepSeek-V4-Pro-0813</h2>
-      <table><tr><th>类别</th><th>空闲时段</th><th>高峰时段</th></tr>
-      <tr><td>输入（缓存命中）</td><td>0.15元</td><td>0.30元</td></tr>
-      <tr><td>输入（缓存未命中）</td><td>4.5元</td><td>9.0元</td></tr>
-      <tr><td>输出</td><td>13.5元</td><td>27.0元</td></tr></table>`;
+      <h2>模型细节</h2>
+      <table>
+      <tr><th>模型</th><th>deepseek-v4-flash</th><th>deepseek-v4-pro</th></tr>
+      <tr><td>模型版本</td><td>DeepSeek-V4-Flash-0731</td><td>DeepSeek-V4-Pro-0813</td></tr>
+      <tr><td>上下文长度</td><td>1M</td><td>1M</td></tr>
+      <tr><td>输出长度</td><td>最大 384K</td><td>最大 384K</td></tr>
+      <tr><td>百万tokens输入（缓存命中）</td><td>空闲时段 0.05元</td><td>空闲时段 0.15元</td></tr>
+      <tr><td>百万tokens输入（缓存未命中）</td><td>空闲时段 1.5元</td><td>空闲时段 4.5元</td></tr>
+      <tr><td>百万tokens输出</td><td>空闲时段 4.5元</td><td>空闲时段 13.5元</td></tr>
+      </table>`;
     global.fetch = async () => ({ ok: true, status: 200, text: async () => pricingHtml });
     f = fakeRes();
     await freshPricing.handler({}, f.res);
@@ -214,6 +214,8 @@ async function hostTests() {
     if (parsed.rows['deepseek-v4-flash'].offPeak.inputPerM !== 1.5
         || parsed.rows['deepseek-v4-flash'].offPeak.outputPerM !== 4.5
         || parsed.rows['deepseek-v4-flash'].offPeak.cacheReadPerM !== 0.05
+        || parsed.rows['deepseek-v4-pro'].offPeak.inputPerM !== 4.5
+        || parsed.rows['deepseek-v4-pro'].offPeak.outputPerM !== 13.5
         || parsed.rows['deepseek-v4-pro'].peak.outputPerM !== 27) {
       throw new Error('pricing parse wrong: ' + JSON.stringify(parsed.rows));
     }
