@@ -14,6 +14,9 @@
     "./package.json": "./package.json"
   },
   "dsh": {
+    "bundle": {
+      "patch": "dsh-token-viewer.yml"
+    },
     "client": {
       "platform": "web",
       "inject": [

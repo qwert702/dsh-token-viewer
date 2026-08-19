@@ -1,0 +1,11 @@
+# dsh-token-viewer profile patch (activated via dsh.bundle once installed):
+# the plugin vendors a fork of the sidebar shell with one extra slot
+# (`sidebar.workspaces.header`), so the stock ui-sidebar row is disabled to
+# avoid a duplicate `sidebar` declaration, and the token-viewer client is
+# inserted into the app layer.
+- id: ui-sidebar
+  disabled: true
+
+- insert:
+    - id: ui-token-viewer
+      name: 'dsh-token-viewer'
