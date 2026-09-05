@@ -12,7 +12,22 @@ const path = require('node:path');
 const pkg = path.resolve(__dirname, '..');
 const bundle = path.join(pkg, 'lib/client.js');
 const hostFile = path.join(pkg, 'lib/index.js');
-const reactRoot = process.env.DSH_REACT_ROOT ?? 'C:/Users/cbn/.dsh/profiles/node_modules';
+// react and react-dom must come from the SAME copy: the deployment tree's
+// top-level react (18.x) has no matching top-level react-dom, and mixing
+// react@18 elements with react-dom@19's server renderer fails with
+// "Objects are not valid as a React child". The trajectory package ships a
+// matched react/react-dom pair — probe it before falling back to the profile.
+const candidateRoots = [
+  'C:/Users/cbn/.dsh/profiles/node_modules/@deepseek-ai/dsh-client-ui-trajectory/node_modules',
+  'C:/Users/cbn/.dsh/profiles/node_modules',
+];
+const reactRoot = process.env.DSH_REACT_ROOT ?? candidateRoots.find((root) => {
+  try {
+    const reactVer = require(path.join(root, 'react/package.json')).version;
+    const domVer = require(path.join(root, 'react-dom/package.json')).version;
+    return reactVer.split('.')[0] === domVer.split('.')[0];
+  } catch { return false; }
+}) ?? candidateRoots[candidateRoots.length - 1];
 
 // The host half imports harness packages. When this checkout has no
 // node_modules (fresh clone), junction the harness install's node_modules
@@ -246,7 +261,7 @@ function clientTests() {
     if (spec === 'react') return require(path.join(reactRoot, 'react'));
     if (spec === 'react/jsx-runtime') return require(path.join(reactRoot, 'react/jsx-runtime'));
     if (spec === '@deepseek-ai/dsh-client-ui-primitives') return {};
-    if (spec === '@deepseek-ai/dsh-client-runtime/client') {
+    if (spec === '@deepseek-ai/dsh-client-runtime/client' || spec === '@deepseek-ai/dsh-client-store') {
       // Minimal defineStore stand-in: enough for createTokenDetailStore().
       return {
         defineStore: (decl) => {

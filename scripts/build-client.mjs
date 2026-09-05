@@ -20,6 +20,7 @@ const outFile = path.join(pkgRoot, 'lib', 'client.js');
 
 const candidates = [
   path.join(os.homedir(), '.dsh', 'profiles', 'node_modules', '@deepseek-ai', 'dsh-client-ui-sidebar', 'lib', 'client.js'),
+  'D:/CBN-HT/Desktop/deepseek hnerses/node_modules/@deepseek-ai/dsh-client-ui-sidebar/lib/client.js',
   'C:/Program Files/@deepseek-ai/dsh/profiles/node_modules/@deepseek-ai/dsh-client-ui-sidebar/lib/client.js',
 ];
 const sidebarBundle = process.env.DSH_SIDEBAR_BUNDLE ?? candidates.find((c) => existsSync(c));
@@ -55,7 +56,7 @@ head = head.replace(
 );
 head = head.replace(
   'let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");',
-  'let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");\n\t\tlet _deepseek_ai_dsh_client_runtime_client = require("@deepseek-ai/dsh-client-runtime/client");',
+  'let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");\n\t\tlet _deepseek_ai_dsh_client_store = require("@deepseek-ai/dsh-client-store");',
 );
 
 // ---- body: namespace the vendored CSS tags -------------------------------
