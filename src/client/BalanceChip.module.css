@@ -1,0 +1,79 @@
+/* Sidebar-foot balance chip. The wide row mirrors the sidebar's own rows
+   (36px tall, 12px radius, hover fill); the rail form is the 36px square the
+   collapsed column reserves for its foot actions. */
+
+.action {
+  box-sizing: border-box;
+  min-height: 36px;
+  width: auto;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: 0 0;
+  border: none;
+  border-radius: 12px;
+  align-items: center;
+  gap: 6px;
+  margin: 0 2px;
+  padding: 7px 8px;
+  line-height: 22px;
+  display: flex;
+}
+
+.action:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.action:focus-visible,
+.rail:focus-visible {
+  outline: 2px solid var(--dsw-alias-label-primary);
+  outline-offset: -2px;
+}
+
+.rail {
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  cursor: pointer;
+  background: 0 0;
+  border: none;
+  border-radius: 12px;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  display: flex;
+}
+
+.rail:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.mark {
+  flex: none;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.amount {
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+  overflow: hidden;
+}
+
+.amountError {
+  min-width: 0;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+}

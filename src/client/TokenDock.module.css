@@ -44,7 +44,7 @@
 }
 
 .sep {
-  color: var(--dsw-alias-separator-primary);
+  color: var(--dsw-alias-label-dimmed);
 }
 
 .occ {

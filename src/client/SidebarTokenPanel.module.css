@@ -1,51 +1,36 @@
-.card {
+/* The Token panel page: a full-width `main` panel, so it centres its content
+   in a readable column instead of the old margin-hugging sidebar card. */
+
+.page {
   box-sizing: border-box;
-  border: 1px solid var(--dsw-alias-border-l1);
-  background: var(--dsw-specific-tip);
-  border-radius: 10px;
-  margin: 2px 8px 6px;
-  padding: 7px 10px;
-  flex: none;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 18px 20px 24px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 10px;
 }
 
 .titleRow {
   flex: none;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   display: flex;
-}
-
-.detailButton {
-  align-self: flex-start;
-  color: var(--dsw-alias-state-business-primary);
-  cursor: pointer;
-  background: 0 0;
-  border: none;
-  gap: 4px;
-  padding: 0;
-  font-size: 11px;
-  line-height: 16px;
-  display: inline-flex;
-}
-
-.detailButton:hover {
-  color: var(--dsw-alias-label-secondary);
+  flex-wrap: wrap;
 }
 
 .title {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  line-height: 16px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 20px;
   font-weight: 600;
 }
 
 .line {
   flex-wrap: wrap;
   align-items: center;
-  gap: 2px 10px;
+  gap: 2px 14px;
   display: flex;
 }
 
@@ -62,4 +47,27 @@
 .seg strong {
   color: var(--dsw-alias-label-secondary);
   font-weight: 600;
+}
+
+.empty {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.detailButton {
+  align-self: flex-start;
+  color: var(--dsw-alias-state-business-primary);
+  cursor: pointer;
+  background: 0 0;
+  border: none;
+  gap: 4px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 18px;
+  display: inline-flex;
+}
+
+.detailButton:hover {
+  color: var(--dsw-alias-label-secondary);
 }

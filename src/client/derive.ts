@@ -9,7 +9,7 @@ import type {
   ContextPressureProjection,
   TokenUsageProjection,
 } from '@deepseek-ai/dsh-token-meter/client'
-import type { SessionId, SessionSummary, WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId, SessionSummary, WorkspaceId, WorkspaceView } from './types.ts'
 
 /**
  * Compact token count: 517 / 12.2K / 517K / 1.2M (one decimal under three digits).

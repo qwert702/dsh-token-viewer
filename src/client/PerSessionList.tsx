@@ -5,7 +5,7 @@
  * session.
  */
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId } from './types.ts'
 import { formatTokens, type PerSessionRow } from './derive.ts'
 import type { TokenKey } from './locales.ts'
 import css from './PerSessionList.module.css'

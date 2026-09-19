@@ -1,11 +1,17 @@
 /**
  * Token viewer plugin, node half. Hosts the DeepSeek account-balance endpoint
- * the browser half renders: `GET /api/billing/balance` reads its configuration
- * from the harness settings namespace `dsh-token-viewer` (which credential
- * reference and provider base URL to use), resolves the API key through the
- * credentials service (the same secret store the LLM adapter uses), and
- * proxies the provider's `/user/balance` response without ever exposing the
- * key. The browser half ships via exports["./client"], discovered through the
+ * and the provider pricing table the browser half renders, plus the two
+ * session projections (`modelUsage`, `usageLog`) its surfaces fold.
+ *
+ * `GET /api/billing/balance` reads its configuration from the harness settings
+ * namespace `dsh-token-viewer` (which credential reference and provider base
+ * URL to use), resolves the API key through the credentials service (the
+ * harness-managed secret store), and proxies the provider's `/user/balance`
+ * response without ever exposing the key. `GET /api/billing/pricing` serves
+ * the provider's list prices, fetched from the official pricing page with a
+ * short TTL and falling back to the built-in table.
+ *
+ * The browser half ships via exports["./client"], discovered through the
  * package.json dsh.client declaration.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -14,10 +20,14 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 // Type-only: pulls the credentials Context merge (ctx.credentials).
 import type {} from '@deepseek-ai/dsh-credentials'
+// Type-only: pulls the settings Context merge (ctx.settings).
+import type {} from '@deepseek-ai/dsh-settings'
+// Type-only: pulls the sessionProjections Context merge.
+import type {} from '@deepseek-ai/dsh-session-projection'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
+import { z as zWire } from 'zod'
 
 /** Credential reference holding the DeepSeek API key (adapter default). */
 const DEFAULT_API_KEY_REF = 'DEEPSEEK_API_KEY'
@@ -25,23 +35,12 @@ const DEFAULT_API_KEY_REF = 'DEEPSEEK_API_KEY'
 const DEFAULT_BASE_URL = 'https://api.deepseek.com'
 
 /** Settings namespace holding the balance proxy configuration. */
-const BALANCE_NAMESPACE = settingsNamespace('dsh-token-viewer')
+const BALANCE_NAMESPACE = 'dsh-token-viewer'
 /** Schema: the credential reference resolving to the API key, and the provider base URL. */
 const BALANCE_SCHEMA = z.object({
   apiKeyRef: z.string().default(DEFAULT_API_KEY_REF),
   baseURL: z.string().default(DEFAULT_BASE_URL),
 })
-
-/** Composition-layer defaults for the balance proxy (below the user settings layer). */
-export const Config = z.object({
-  apiKeyRef: z.string().default(DEFAULT_API_KEY_REF),
-  baseURL: z.string().default(DEFAULT_BASE_URL),
-})
-
-/** Cordis plugin name for the host half. */
-export const name = 'dsh-token-viewer-host'
-/** Services required by the balance route, its settings namespace, and the model-usage projection. */
-export const inject = ['webServer', 'credentials', 'settings', 'sessionProjections']
 
 /** Resolved balance proxy configuration. */
 interface BalanceConfig {
@@ -64,26 +63,6 @@ interface ModelUsageState {
   byModel: Record<string, ModelUsageBuckets>
 }
 
-/** Zero bucket for a model that has not reported yet. */
-const zeroModelUsage = (): ModelUsageBuckets => ({
-  uncachedInputTokens: 0,
-  outputTokens: 0,
-  cacheReadTokens: 0,
-  cacheWriteTokens: 0,
-  requests: 0,
-})
-
-/** Wire schema for the modelUsage projection value. */
-const modelUsageSchema = z.object({
-  byModel: z.record(z.string(), z.object({
-    uncachedInputTokens: z.number().int().nonnegative(),
-    outputTokens: z.number().int().nonnegative(),
-    cacheReadTokens: z.number().int().nonnegative(),
-    cacheWriteTokens: z.number().int().nonnegative(),
-    requests: z.number().int().nonnegative(),
-  })),
-})
-
 /**
  * One per-request usage record in the usageLog projection, in CC Switch's
  * request-log shape. Field names are compact because the array grows with
@@ -105,17 +84,86 @@ interface UsageLogState {
   entries: UsageLogEntry[]
 }
 
-/** Wire schema for the usageLog projection value. */
-const usageLogSchema = z.object({
-  entries: z.array(z.object({
-    t: z.number(),
-    m: z.string(),
-    i: z.number().int().nonnegative(),
-    o: z.number().int().nonnegative(),
-    r: z.number().int().nonnegative(),
-    w: z.number().int().nonnegative(),
-  })),
-})
+declare module '@deepseek-ai/dsh-session-projection' {
+  interface SessionProjectionMap {
+    /** Per-model consumption buckets (the sidebar's aggregate fallback face). */
+    modelUsage: ModelUsageState
+    /** Per-request usage records with their own commit times (the statistics face). */
+    usageLog: UsageLogState
+  }
+  interface SessionProjectionStateMap {
+    modelUsage: ModelUsageState
+    usageLog: UsageLogState
+  }
+}
+
+/** One model bucket row, shared by the state and wire schemas. */
+const bucketSchema = zWire.object({
+  uncachedInputTokens: zWire.number().int().nonnegative(),
+  outputTokens: zWire.number().int().nonnegative(),
+  cacheReadTokens: zWire.number().int().nonnegative(),
+  cacheWriteTokens: zWire.number().int().nonnegative(),
+  requests: zWire.number().int().nonnegative(),
+}).strict()
+
+/** One per-request usage record, shared by the state and wire schemas. */
+const logEntrySchema = zWire.object({
+  t: zWire.number(),
+  m: zWire.string(),
+  i: zWire.number().int().nonnegative(),
+  o: zWire.number().int().nonnegative(),
+  r: zWire.number().int().nonnegative(),
+  w: zWire.number().int().nonnegative(),
+}).strict()
+
+/** State schema for the modelUsage unit: validated before it seeds a fold. */
+const modelUsageStateSchema = zWire.object({ byModel: zWire.record(zWire.string(), bucketSchema) }).strict()
+/** Wire view schema for the modelUsage unit (what the browser may read). */
+const modelUsageWireSchema = modelUsageStateSchema
+/** State schema for the usageLog unit: validated before it seeds a fold. */
+const usageLogStateSchema = zWire.object({ entries: zWire.array(logEntrySchema) }).strict()
+/** Wire view schema for the usageLog unit (what the browser may read). */
+const usageLogWireSchema = usageLogStateSchema
+
+/**
+ * Fold one committed event into the per-model usage state. Only
+ * `assistant/message` events with provider usage attribute their buckets to
+ * the message's model (`message.source.model`) — the same authoritative
+ * per-step sample token-meter uses.
+ * @param state - the state covering all prior events.
+ * @param event - one committed session event.
+ * @returns the next state (unchanged reference for uninterested events).
+ */
+function modelUsageApply(state: ModelUsageState, event: SessionEvent): ModelUsageState {
+  if (event.type !== 'assistant/message') return state
+  const usage = event.data.usage
+  if (usage === undefined) return state
+  const model = event.data.message.source?.model
+  if (model === undefined || model === '') return state
+  const billed = usage.inputTokens + usage.outputTokens
+    + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
+  if (billed <= 0) return state
+  const prev = state.byModel[model] ?? {
+    uncachedInputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    requests: 0,
+  }
+  return {
+    ...state,
+    byModel: {
+      ...state.byModel,
+      [model]: {
+        uncachedInputTokens: prev.uncachedInputTokens + usage.inputTokens,
+        outputTokens: prev.outputTokens + usage.outputTokens,
+        cacheReadTokens: prev.cacheReadTokens + (usage.cacheReadTokens ?? 0),
+        cacheWriteTokens: prev.cacheWriteTokens + (usage.cacheWriteTokens ?? 0),
+        requests: prev.requests + 1,
+      },
+    },
+  }
+}
 
 /**
  * Fold one committed event into the per-request usage log. Mirrors
@@ -136,68 +184,40 @@ function usageLogApply(state: UsageLogState, event: SessionEvent): UsageLogState
   const r = usage.cacheReadTokens ?? 0
   const w = usage.cacheWriteTokens ?? 0
   if (usage.inputTokens + usage.outputTokens + r + w <= 0) return state
-  return {
-    entries: [...state.entries, { t: event.time, m: model, i: usage.inputTokens, o: usage.outputTokens, r, w }],
-  }
+  return { entries: [...state.entries, { t: event.time, m: model, i: usage.inputTokens, o: usage.outputTokens, r, w }] }
 }
 
 /**
- * Fold one committed event into the per-model usage state. Only
- * `assistant/message` events with provider usage attribute their buckets to
- * the message's model (`message.source.model`) — the same authoritative
- * per-step sample token-meter uses.
- * @param state - the state covering all prior events.
- * @param event - one committed session event.
- * @returns the next state (unchanged reference for uninterested events).
- */
-function modelUsageApply(state: ModelUsageState, event: SessionEvent): ModelUsageState {
-  if (event.type !== 'assistant/message') return state
-  const usage = event.data.usage
-  if (usage === undefined) return state
-  const model = event.data.message.source?.model
-  if (model === undefined || model === '') return state
-  const input = usage.inputTokens + (usage.cacheWriteTokens ?? 0)
-  if (input + usage.outputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0) <= 0) return state
-  const prev = state.byModel[model] ?? zeroModelUsage()
-  return {
-    ...state,
-    byModel: {
-      ...state.byModel,
-      [model]: {
-        uncachedInputTokens: prev.uncachedInputTokens + usage.inputTokens,
-        outputTokens: prev.outputTokens + usage.outputTokens,
-        cacheReadTokens: prev.cacheReadTokens + (usage.cacheReadTokens ?? 0),
-        cacheWriteTokens: prev.cacheWriteTokens + (usage.cacheWriteTokens ?? 0),
-        requests: prev.requests + 1,
-      },
-    },
-  }
-}
-
-/**
- * Register the modelUsage and usageLog session projections: cumulative
- * per-model consumption for the sidebar's fallback row, and the per-request
- * usage log the detail panel's CC Switch-style statistics aggregate. The
- * projection registry is provided by the host.
+ * Register the modelUsage and usageLog session projections. Both declare a
+ * `wire` view, which is what makes them readable as `projectionValues` in the
+ * browser — a unit without one stays host-only. Each view returns the state
+ * object itself, so the registry's `Object.is` gate publishes nothing when a
+ * fold produced no new reference.
  * @param ctx - host context carrying the sessionProjections service.
  */
-function installModelUsageProjection(ctx: Context): void {
+function installUsageProjections(ctx: Context): void {
   ctx.inject(['sessionProjections'], (projectionCtx) => {
     projectionCtx.sessionProjections.register({
       key: 'modelUsage',
-      schema: modelUsageSchema,
+      stateSchema: modelUsageStateSchema,
+      stateVersion: 1,
       init: (): ModelUsageState => ({ byModel: {} }),
       apply: modelUsageApply,
-      view: (state: ModelUsageState): ModelUsageState => state,
-      stateVersion: 1,
+      wire: {
+        viewSchema: modelUsageWireSchema,
+        view: (state: ModelUsageState): ModelUsageState => state,
+      },
     })
     projectionCtx.sessionProjections.register({
       key: 'usageLog',
-      schema: usageLogSchema,
+      stateSchema: usageLogStateSchema,
+      stateVersion: 1,
       init: (): UsageLogState => ({ entries: [] }),
       apply: usageLogApply,
-      view: (state: UsageLogState): UsageLogState => state,
-      stateVersion: 1,
+      wire: {
+        viewSchema: usageLogWireSchema,
+        view: (state: UsageLogState): UsageLogState => state,
+      },
     })
   })
 }
@@ -268,16 +288,146 @@ async function handleBalance(
   }
 }
 
+/** One model's price tier, CNY per million tokens. */
+export interface ModelPrice {
+  inputPerM: number
+  outputPerM: number
+  cacheReadPerM: number
+  cacheWritePerM: number
+}
+
+/** One model's off-peak and peak price rows. */
+export interface ModelPricing {
+  offPeak: ModelPrice
+  peak: ModelPrice
+}
+
+/** Parsed pricing table keyed by canonical model id. */
+export type PricingTable = Record<string, ModelPricing>
+
 /**
- * Register the settings namespace and the balance route for the browser half.
- * @param ctx - host context carrying the webServer, credentials, and settings services.
+ * Parse the provider pricing page into the pricing-table shape: one row per
+ * model with off-peak (standard) and peak tiers per million tokens. The page
+ * lists cache-hit / cache-miss / output prices per model; cache writes bill
+ * at the cache-miss rate, and the peak tier is the off-peak double. Returns
+ * null when the page is unreachable or its shape changed.
+ * @param html - the pricing page HTML.
+ * @returns pricing rows keyed by model id, or null when unparseable.
+ */
+export function parsePricingPage(html: string): PricingTable | null {
+  try {
+    const rows: PricingTable = {}
+    const modelPatterns = [
+      { re: /V4-Flash/i, key: 'deepseek-v4-flash', col: 0 },
+      { re: /V4-Pro/i, key: 'deepseek-v4-pro', col: 1 },
+    ]
+    for (const pattern of modelPatterns) {
+      const idx = html.search(pattern.re)
+      if (idx < 0) continue
+      const block = html.slice(idx, idx + 8000)
+      // the price table lists models side by side: each row carries one
+      // "N元" figure per model (flash first, then pro). Collect every row's
+      // figures and pick the model's column.
+      const rowLines = block.split('</tr>')
+      const rowNums = (label: string): number[] | null => {
+        for (const line of rowLines) {
+          if (!line.includes(label)) continue
+          const nums: number[] = []
+          const re = /([0-9]+(?:\.[0-9]+)?)\s*元/g
+          let m: RegExpExecArray | null = null
+          while ((m = re.exec(line)) !== null) nums.push(Number(m[1]))
+          if (nums.length > 0) return nums
+        }
+        return null
+      }
+      const hitNums = rowNums('缓存命中')
+      const missNums = rowNums('缓存未命中')
+      const outNums = rowNums('输出')
+      if (hitNums === null || missNums === null || outNums === null) continue
+      const cacheHit = hitNums[pattern.col]
+      const cacheMiss = missNums[pattern.col]
+      const output = outNums[pattern.col]
+      if (cacheHit === undefined || cacheMiss === undefined || output === undefined) continue
+      if (cacheHit <= 0 || cacheMiss <= cacheHit || output <= 0 || cacheMiss > 100) continue
+      rows[pattern.key] = {
+        offPeak: { inputPerM: cacheMiss, outputPerM: output, cacheReadPerM: cacheHit, cacheWritePerM: cacheMiss },
+        peak: {
+          inputPerM: cacheMiss * 2,
+          outputPerM: output * 2,
+          cacheReadPerM: cacheHit * 2,
+          cacheWritePerM: cacheMiss * 2,
+        },
+      }
+    }
+    return Object.keys(rows).length > 0 ? rows : null
+  } catch {
+    return null
+  }
+}
+
+/** Built-in fallback pricing (provider list prices, CNY per 1M tokens). */
+export const PRICING_FALLBACK: PricingTable = {
+  'deepseek-v4-flash': {
+    offPeak: { inputPerM: 1.5, outputPerM: 4.5, cacheReadPerM: 0.05, cacheWritePerM: 1.5 },
+    peak: { inputPerM: 3, outputPerM: 9, cacheReadPerM: 0.1, cacheWritePerM: 3 },
+  },
+  'deepseek-v4-pro': {
+    offPeak: { inputPerM: 4.5, outputPerM: 13.5, cacheReadPerM: 0.15, cacheWritePerM: 4.5 },
+    peak: { inputPerM: 9, outputPerM: 27, cacheReadPerM: 0.3, cacheWritePerM: 9 },
+  },
+}
+
+/** URL of the provider's pricing page. */
+const PRICING_URL = 'https://api-docs.deepseek.com/zh-cn/quick_start/pricing/'
+
+/** Time-to-live of the fetched pricing table. */
+const PRICING_TTL_MS = 15 * 60 * 1000
+
+/** Module-level pricing cache: null until the first request resolves it. */
+let pricingCache: { at: number; source: 'official' | 'builtin'; rows: PricingTable } | null = null
+
+/**
+ * Serve the provider pricing table: fetched from the official page with a
+ * 15-minute cache, falling back to the built-in table on any failure. The
+ * response marks the source so the browser can decide how loudly to trust it.
+ * @param req - incoming request (unused; a bare GET).
+ * @param res - response the handler fully owns.
+ */
+async function handlePricing(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const send = (source: 'official' | 'builtin', rows: PricingTable): void => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ ok: true, source, rows, fetchedAt: Date.now() }))
+  }
+  const now = Date.now()
+  if (pricingCache !== null && now - pricingCache.at < PRICING_TTL_MS) {
+    send(pricingCache.source, pricingCache.rows)
+    return
+  }
+  try {
+    const response = await fetch(PRICING_URL, { signal: AbortSignal.timeout(15000) })
+    if (!response.ok) throw new Error('pricing page http ' + response.status)
+    const html = await response.text()
+    const parsed = parsePricingPage(html)
+    if (parsed === null) throw new Error('pricing page shape changed')
+    pricingCache = { at: Date.now(), source: 'official', rows: parsed }
+    send('official', parsed)
+  } catch {
+    pricingCache = { at: now, source: 'builtin', rows: PRICING_FALLBACK }
+    send('builtin', PRICING_FALLBACK)
+  }
+}
+
+/**
+ * Register the usage projections, the settings namespace, and the balance and
+ * pricing routes for the browser half.
+ * @param ctx - host context carrying the webServer, credentials, settings, and sessionProjections services.
  */
 export function apply(ctx: Context): void {
-  installModelUsageProjection(ctx)
+  installUsageProjections(ctx)
   let source: () => BalanceConfig = () => ({ apiKeyRef: DEFAULT_API_KEY_REF, baseURL: DEFAULT_BASE_URL })
-  installSettingsSection(ctx, BALANCE_NAMESPACE, BALANCE_SCHEMA, ctx.config, {
-    setSource: (current) => { source = current },
-    onChange: () => {},
+  ctx.inject(['settings'], (settingsCtx) => {
+    const scope = settingsCtx.settings.register(BALANCE_NAMESPACE, BALANCE_SCHEMA)
+    source = () => scope.get()
   })
   ctx.effect(
     () => ctx.webServer.register({
@@ -287,4 +437,17 @@ export function apply(ctx: Context): void {
     }),
     'dsh-token-viewer: balance route',
   )
+  ctx.effect(
+    () => ctx.webServer.register({
+      kind: 'exact',
+      path: '/api/billing/pricing',
+      handler: handlePricing,
+    }),
+    'dsh-token-viewer: pricing route',
+  )
 }
+
+/** Cordis plugin name for the host half. */
+export const name = 'dsh-token-viewer-host'
+/** Services required by the balance route, its settings namespace, and the usage projections. */
+export const inject = ['webServer', 'credentials', 'settings', 'sessionProjections']

@@ -6,13 +6,16 @@ DeepSeek Harness 网页端 **CC Switch 风格 Token 消耗统计**插件。纯�
 > ```
 > dsh plugin add qwert702/dsh-token-viewer
 > ```
-> 重启 harness、刷新网页后，打开侧边栏 **Token 消耗** 卡片 → **用量详情**。
+> 重启 harness、刷新网页后，点击侧边栏面板列表里的 **Token** 图标；账号余额同时以 chip 形式显示在侧边栏底部。
+
+适配 harness **0.1.6-alpha.2**。早期版本会禁用官方 `ui-sidebar` 插件、fork 它的 `sidebar.workspaces.header` 插槽；该插槽在 0.1.6 已移除，因此 **v0.2.1 起不再覆盖任何官方插件**，改为注册进原生插槽。跑旧版 harness 请锁 v0.2.0。
 
 ## 功能
 
+- **侧边栏面板** — 侧边栏全局面板列表里的 **Token** 行；点击后主区打开插件页面：DeepSeek 账号余额（可刷新；host 代理失败显示错误重试）+ 全会话用量汇总，可展开按会话明细。
+- **余额 chip** — 侧边栏底部常驻账号余额（宽栏显示完整金额，收起成轨道时显示货币符号）；点击打开统计抽屉。
 - **TokenDock** — 输入区上方悬浮条：当前会话计费输入（未缓存 + 缓存读 + 缓存写）、输出、缓存命中率、近似上下文占用率。
-- **侧边栏卡片** — DeepSeek 账号余额（可刷新；host 代理失败显示错误重试）+ 全会话用量汇总，可展开按会话明细。
-- **用量统计面板**（右侧抽屉，完整移植 CC Switch 用量看板口径）：
+- **用量统计面板**（`shell.overlay` 抽屉，完整移植 CC Switch 用量看板口径）：
   - **按请求统计** — host 侧 `usageLog` 投影为每条上报用量的 assistant 步骤记录一条（提交时间、模型、四个 token 桶）；所有数字折叠自这些请求记录，而非会话累计值。
   - **Hero** — 真实消耗（新增输入 + 输出 + 缓存写 + 缓存读）、请求数、总成本，下排五卡 + 缓存命中率进度条。
   - **趋势图** — 按每条请求自身的提交时间分桶（当天按小时、多天按天，空桶补零），四个 token 序列 + 虚线成本线。
@@ -29,18 +32,31 @@ DeepSeek Harness 网页端 **CC Switch 风格 Token 消耗统计**插件。纯�
 
 ![按项目统计 Tab](docs/panel-projects.png)
 
+## 插槽布局
+
+共五个注册，全部使用原生插槽（见 `src/client/index.ts`）：
+
+| 插槽 | 界面 | Id |
+| --- | --- | --- |
+| `sidebar.panellist` | 面板行 + 图标 | `token` |
+| `main` | 面板页（其 `key` 必须等于面板行的 `id`） | `token` |
+| `sidebar.footer.action` | 余额 chip | `token-viewer-balance` |
+| `conversation.input.dock` | 实时用量条 | `token-viewer` |
+| `shell.overlay` | 统计抽屉 | `token-viewer-detail` |
+
 ## 仓库结构
 
-- `lib/index.js` — 插件 host 半区（余额路由 + `modelUsage` / `usageLog` 会话投影），开箱即用。
-- `lib/client.js` — 浏览器半区（已构建），通过 `package.json` 的 `dsh.client` 声明被发现。
-- `scripts/build-client.mjs` — 重新生成 `lib/client.js`：从已安装的 `@deepseek-ai/dsh-client-ui-sidebar` bundle 提取外壳（可用 `DSH_SIDEBAR_BUNDLE` 指定，否则探测 `~/.dsh/profiles`）。
-- `test/smoke.cjs` — `node test/smoke.cjs`：host 路由 + 投影折叠 + SSR 渲染检查。
+- `src/index.ts` — host 半区源码（余额 + 定价路由，`modelUsage` / `usageLog` 会话投影，均带 `wire` 视图供浏览器读取）。**`src` 是唯一真源。**
+- `src/client/**` — 浏览器半区源码：上述五个插槽入口、组件与 CSS Modules。
+- `lib/index.js`、`lib/client.js` — harness 实际加载的构建产物。刻意入库，使 `dsh plugin add` 无需构建步骤即可用。
+- `scripts/build-client.mjs` — `node scripts/build-client.mjs`：用 esbuild 构建两个半区（`src/index.ts` → `lib/index.js`，`src/client/index.ts` → `lib/client.js`）。`react` 与 harness 其余静态浏览器模块保持 external；`.module.css` 经内置的小型 CSS Modules 插件处理：作用域化类名，并在物化时注入 `<style data-plugin data-plugin-css>`。
+- `test/smoke.cjs` — `node test/smoke.cjs`：免 harness 冒烟测试。在 `vm` 沙箱里 stub `window.__ModuleLoader__`，对录制式插槽注册表跑 `apply()`，用 stub kit 渲染每个组件，并真实 import host 半区。
 
 TypeScript monorepo 源码（提取自 `deepseek-ai/deepseek-harness`）保存在 `archive/monorepo-src` 分支。
 
 ## 模型牌价
 
-`lib/client.js` 中的 `MODEL_PRICING`（以及 `lib/index.js` 的回退表）保存当前 DeepSeek 牌价；面板打开时会先请求 `GET /api/billing/pricing`，优先采用官方定价页数据，不可达时静默回退内置表。
+`src/index.ts` 中的 `PRICING_FALLBACK`（构建进 `lib/index.js`）保存当前 DeepSeek 牌价；面板会请求 `GET /api/billing/pricing`，优先采用官方定价页数据，不可达时静默回退内置表。浏览器半区不自带牌价表，完全按路由返回结果计费。
 
 ## License
 

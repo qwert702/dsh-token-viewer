@@ -6,19 +6,22 @@ CC Switch-style token consumption statistics for the **DeepSeek Harness Web GUI*
 > ```
 > dsh plugin add qwert702/dsh-token-viewer
 > ```
-> Restart the harness, refresh the web page, then open the **Token 消耗** card in the sidebar → **用量详情**.
+> Restart the harness, refresh the web page, then click the **Token** icon in the sidebar panel list; the account balance also shows up as a chip at the bottom of the sidebar.
+
+Targets harness **0.1.6-alpha.2**. Earlier versions of this plugin disabled the official `ui-sidebar` plugin and forked its `sidebar.workspaces.header` slot; that slot is gone in 0.1.6, so **v0.2.1 and later no longer override any official plugin** — it registers into the stock slots instead. On an older harness, pin v0.2.0.
 
 ## Features
 
+- **Sidebar panel** — a **Token** row in the sidebar's global panel list; clicking it opens the plugin's page in the main area: DeepSeek account balance (with refresh; error-retry when the host proxy fails) and aggregate consumption across all sessions, expandable to a per-conversation list.
+- **Balance chip** — the sidebar footer carries the live account balance (full amount when the sidebar is wide, a bare currency mark on the collapsed rail); clicking it opens the statistics drawer.
 - **TokenDock** — a slim live strip above the composer showing the current session's billed input (uncached + cache read + cache write), output, cache hit rate, and approximate context occupancy.
-- **Sidebar card** — DeepSeek account balance (with refresh; error-retry when the host proxy fails) and aggregate consumption across all sessions, expandable to a per-conversation list.
-- **Usage statistics panel** (right-side drawer, a faithful port of CC Switch's usage-dashboard method):
+- **Usage statistics panel** (drawer in `shell.overlay`, a faithful port of CC Switch's usage-dashboard method):
   - **Per-request statistics** — the host `usageLog` projection records one timestamped entry per reported assistant step (commit time, model, four token buckets); every figure folds these records, never cumulative session totals.
   - **Hero** — real consumption (fresh input + output + cache write + cache read), request count, total cost, over a five-card breakdown row with a cache-hit-rate progress bar.
   - **Trend chart** — requests bucketed by their own commit time (hourly for the day, daily otherwise, empty buckets zero-filled), four token series plus a dashed cost line.
   - **Three tabs** — request log (newest first; clicking a row opens that session), per-project statistics, and per-model statistics with average cost.
   - **Range presets** — today / 7d / 14d / 30d / all, resolved exactly like CC Switch (local midnight of N−1 days back).
-- **Per-model peak/off-peak list pricing** — every request bills under its own model's provider list price (V4-Flash / V4-Pro, CNY per 1M tokens, cache writes at the cache-miss rate), split by the provider's Beijing peak windows (09:00–12:00 and 14:00–18:00, double the off-peak rate); versioned model ids match by prefix, unknown models fall back to the V4-Flash off-peak table. Prices live in `MODEL_PRICING` (see below).
+- **Per-model peak/off-peak list pricing** — every request bills under its own model's provider list price (V4-Flash / V4-Pro, CNY per 1M tokens, cache writes at the cache-miss rate), split by the provider's Beijing peak windows (09:00–12:00 and 14:00–18:00, double the off-peak rate); versioned model ids match by prefix, unknown models fall back to the V4-Flash off-peak table. Prices live in `PRICING_FALLBACK` in the host half (see below).
 - **Balance route** — `GET /api/billing/balance` proxies DeepSeek's `/user/balance` through the harness credentials service; the API key never leaves the server.
 
 ## Screenshots
@@ -29,18 +32,31 @@ CC Switch-style token consumption statistics for the **DeepSeek Harness Web GUI*
 
 ![Per-project statistics tab](docs/panel-projects.png)
 
+## Slot layout
+
+Five registrations, all in stock slots (see `src/client/index.ts`):
+
+| Slot | Surface | Id |
+| --- | --- | --- |
+| `sidebar.panellist` | panel row + icon | `token` |
+| `main` | panel page (its `key` must equal the row's `id`) | `token` |
+| `sidebar.footer.action` | balance chip | `token-viewer-balance` |
+| `conversation.input.dock` | live token strip | `token-viewer` |
+| `shell.overlay` | statistics drawer | `token-viewer-detail` |
+
 ## Repo layout
 
-- `lib/index.js` — plugin host half (balance route + `modelUsage` / `usageLog` session projections), ready to load.
-- `lib/client.js` — browser half bundle (built), discovered via `package.json` `dsh.client`.
-- `scripts/build-client.mjs` — regenerates `lib/client.js` by vendoring the installed `@deepseek-ai/dsh-client-ui-sidebar` bundle (set `DSH_SIDEBAR_BUNDLE` or it probes `~/.dsh/profiles`).
-- `test/smoke.cjs` — `node test/smoke.cjs`: host route + projections + SSR render checks.
+- `src/index.ts` — host half source (balance + pricing routes, `modelUsage` / `usageLog` session projections, all with `wire` views so the browser can read them). **`src` is the single source of truth.**
+- `src/client/**` — browser half source: the five slot entries above, their components, and their CSS Modules.
+- `lib/index.js`, `lib/client.js` — the built artifacts the harness actually loads. Committed on purpose so `dsh plugin add` works with no build step.
+- `scripts/build-client.mjs` — `node scripts/build-client.mjs`: esbuild builds both halves (`src/index.ts` → `lib/index.js`, `src/client/index.ts` → `lib/client.js`). `react` and the harness's other static browser modules stay external; `.module.css` goes through a small built-in CSS Modules plugin that scopes class names and injects a `<style data-plugin data-plugin-css>` tag at materialization.
+- `test/smoke.cjs` — `node test/smoke.cjs`: harness-free smoke test. It stubs `window.__ModuleLoader__` in a `vm` sandbox, runs `apply()` against a recording slot registry, renders every component against a stub kit, and imports the host half for real.
 
 The TypeScript monorepo source (extracted from `deepseek-ai/deepseek-harness`) lives on the `archive/monorepo-src` branch.
 
 ## Model pricing
 
-`MODEL_PRICING` in `lib/client.js` (and `lib/index.js`'s projection fallback) holds the current DeepSeek list prices; the panel also fetches `GET /api/billing/pricing` and prefers the provider's official page when reachable, falling back to the built-in table otherwise.
+`PRICING_FALLBACK` in `src/index.ts` (built into `lib/index.js`) holds the current DeepSeek list prices; the panel fetches `GET /api/billing/pricing`, which prefers the provider's official pricing page when reachable and falls back to the built-in table otherwise. The browser half carries no pricing table of its own — it bills purely from what the route returns.
 
 ## License
 

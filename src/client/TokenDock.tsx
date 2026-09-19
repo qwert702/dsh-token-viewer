@@ -10,10 +10,13 @@ import { useMemo, type ReactElement } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls ui-conversation's SlotMap merge (the input.dock entry).
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+// Type-only: pulls ui-session's SessionStandardProps merge (useProjection).
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 // Type-only: pulls the token-meter SessionProjectionMap merge (typed reads of
 // 'tokenUsage' / 'contextPressure' / 'contextBreakdown').
 import type {} from '@deepseek-ai/dsh-token-meter/client'
 import { deriveTokenView, formatTokens } from './derive.ts'
+import { requireKit } from './kit.ts'
 import css from './TokenDock.module.css'
 
 /** Full props of the dock entry: session standard kit + the locale seat. */
@@ -70,7 +73,17 @@ function dockTooltip(view: NonNullable<ReturnType<typeof deriveTokenView>>, t: T
  * Dock adapter: reads the host-computed token projections; absent usage
  * renders nothing.
  */
-export function TokenDock({ useProjection, t }: TokenDockProps) {
+export function TokenDock(props: TokenDockProps) {
+  if (!requireKit('TokenDock', props, ['useProjection'])) return null
+  return <TokenDockBody {...props} />
+}
+
+/**
+ * Dock body: folds the three token-meter projections into the strip.
+ * @param props - Session standard kit plus the locale seat.
+ * @returns the strip, or nothing until a provider reports usage.
+ */
+function TokenDockBody({ useProjection, t }: TokenDockProps) {
   const usage = useProjection('tokenUsage')
   const pressure = useProjection('contextPressure')
   const breakdown = useProjection('contextBreakdown')

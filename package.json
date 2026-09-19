@@ -1,7 +1,7 @@
 {
   "name": "dsh-token-viewer",
-  "version": "0.2.0",
-  "description": "CC Switch-style token consumption statistics for the DeepSeek Harness Web GUI: per-request usage log, real-consumption hero, request-time-bucketed trend chart, per-model peak/off-peak list pricing, per-project and per-model stats, and account balance.",
+  "version": "0.2.1",
+  "description": "Token consumption statistics for the DeepSeek Harness Web GUI: a Token panel in the sidebar's global panel list, a compact account-balance chip in the sidebar foot, a live usage strip above the composer, and a CC Switch-style statistics drawer (per-request log, request-time-bucketed trend, per-model and per-project pricing tables).",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -20,10 +20,12 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
         "@deepseek-ai/dsh-client-ui-conversation",
-        "@deepseek-ai/dsh-client-ui-sidebar"
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-workspace"
       ]
     }
   },

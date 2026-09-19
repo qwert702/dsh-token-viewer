@@ -1,9 +1,12 @@
+/* `shell.overlay` is a click-through layer: entries must opt back into pointer
+   events, otherwise the drawer would render without receiving clicks. */
 .backdrop {
   position: fixed;
   inset: 0;
   background: rgb(0 0 0 / 0.35);
   justify-content: flex-end;
   display: flex;
+  pointer-events: auto;
 }
 
 .panel {

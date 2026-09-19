@@ -14,17 +14,22 @@
  * Registered into shell.overlay, renders nothing while closed.
  */
 import { useMemo, useState } from 'react'
-import type { PropsLocale, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { SessionId } from './types.ts'
 // Type-only: pulls ui-layout's SlotMap merge (the shell.overlay entry).
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
+// Type-only: pulls ui-session's GlobalStandardProps merge (useSessions).
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+// Type-only: pulls ui-workspace's GlobalStandardProps merge (useWorkspaces).
+import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 // Type-only: pulls the token-meter SessionProjectionMap merge.
 import type {} from '@deepseek-ai/dsh-token-meter/client'
 import {
   collectRequestRecords, formatCostExact, formatTokensShort, modelStats, projectStats,
   requestLogRows, resolveUsageRange, usageSummary, usageTrend, type UsageRange,
 } from './derive.ts'
-import type { TokenDetailStore } from './token-detail-store.ts'
+import { requireKit } from './kit.ts'
+import { tokenDetailStore, useTokenDetailOpen } from './token-detail-store.ts'
 import css from './TokenDetailPanel.module.css'
 
 /** Business face injected by the client plugin body: open a session by id. */
@@ -32,8 +37,8 @@ export interface TokenDetailPanelInjected {
   openSession: (sessionId: SessionId) => void
 }
 
-/** Full props of the detail panel: global seat + shared store + open verb + locale. */
-export type TokenDetailPanelProps = PropsRuntime<'shell.overlay'> & PropsStore<TokenDetailStore> & TokenDetailPanelInjected & PropsLocale<'tokenViewer'>
+/** Full props of the detail panel: root kit + open verb + locale. */
+export type TokenDetailPanelProps = PropsRuntime<'shell.overlay'> & TokenDetailPanelInjected & PropsLocale<'tokenViewer'>
 
 /** Clock label for one request row (HH:MM, plus date when not today). */
 function clockLabel(t: number): string {
@@ -136,12 +141,23 @@ function MiniStat({ label, value, accent }: { label: string; value: string; acce
 }
 
 /**
+ * Slot adapter for the shell.overlay entry: renders the body only when the
+ * runtime kit carries every hook it reads.
+ * @param props - root kit, session-open verb, locale.
+ * @returns the drawer, or nothing.
+ */
+export function TokenDetailPanel(props: TokenDetailPanelProps) {
+  if (!requireKit('TokenDetailPanel', props, ['useSessions', 'useWorkspaces'])) return null
+  return <TokenDetailBody {...props} />
+}
+
+/**
  * Render the right-side statistics drawer.
- * @param props - global seat, shared open store, session-open verb, locale.
+ * @param props - root kit, session-open verb, locale.
  * @returns the drawer, or nothing while closed.
  */
-export function TokenDetailPanel({ useStore, useSessions, useWorkspaces, actions, t, openSession }: TokenDetailPanelProps) {
-  const open = useStore((state) => state.open)
+function TokenDetailBody({ useSessions, useWorkspaces, t, openSession }: TokenDetailPanelProps) {
+  const open = useTokenDetailOpen()
   const byId = useSessions((state) => state.byId)
   const workspaceItems = useWorkspaces((state) => state.items)
   const [range, setRange] = useState<UsageRange>('today')
@@ -155,7 +171,7 @@ export function TokenDetailPanel({ useStore, useSessions, useWorkspaces, actions
   const logs = useMemo(() => requestLogRows(records), [records])
   const isZh = t('today') === '当天'
   if (!open) return null
-  const close = () => { actions.setOpen(false) }
+  const close = () => { tokenDetailStore.setOpen(false) }
   const ranges: UsageRange[] = ['today', '7d', '14d', '30d', 'all']
   const rangeLabelOf = (r: UsageRange): string => t(r === 'all' ? 'all' : r === 'today' ? 'today' : r === '7d' ? 'last7d' : r === '14d' ? 'last14d' : 'last30d')
   const hitPercent = Math.max(0, Math.min(100, summary.cacheHitRate * 100))
