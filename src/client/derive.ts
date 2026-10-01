@@ -214,12 +214,116 @@ export interface TokenPrices {
   cacheWritePerM: number
 }
 
+/** One model's per-million-token prices for one tier. */
+export type TierPrices = TokenPrices
+
+/** One model's off-peak (standard) and peak price rows, CNY per 1M tokens. */
+export interface ModelPricing {
+  offPeak: TierPrices
+  peak: TierPrices
+}
+
+/**
+ * Built-in fallback pricing (provider v4 list prices, CNY per 1M tokens), the
+ * client mirror of the host's PRICING_FALLBACK. The host pricing route is
+ * preferred — setPricingTable() replaces this table when its response lands —
+ * so an unreachable route degrades to these rows, never to invented prices.
+ */
+export const MODEL_PRICING_FALLBACK: Record<string, ModelPricing> = {
+  'deepseek-v4-flash': {
+    offPeak: { inputPerM: 1.5, outputPerM: 4.5, cacheReadPerM: 0.05, cacheWritePerM: 1.5 },
+    peak: { inputPerM: 3, outputPerM: 9, cacheReadPerM: 0.1, cacheWritePerM: 3 },
+  },
+  'deepseek-v4-pro': {
+    offPeak: { inputPerM: 4.5, outputPerM: 13.5, cacheReadPerM: 0.15, cacheWritePerM: 4.5 },
+    peak: { inputPerM: 9, outputPerM: 27, cacheReadPerM: 0.3, cacheWritePerM: 9 },
+  },
+}
+
+/** Flash off-peak, the conservative fallback tier for unknown models. */
+const FLASH_OFF_PEAK: TokenPrices = MODEL_PRICING_FALLBACK['deepseek-v4-flash'].offPeak
+
 /** Default prices: DeepSeek v4-flash, CNY per 1M tokens. */
-export const DEFAULT_TOKEN_PRICES: TokenPrices = {
-  inputPerM: 1,
-  outputPerM: 2,
-  cacheReadPerM: 0.2,
-  cacheWritePerM: 1,
+export const DEFAULT_TOKEN_PRICES: TokenPrices = FLASH_OFF_PEAK
+
+/** Active pricing table: the host route's rows once fetched, fallback before. */
+let pricingTable: Record<string, ModelPricing> = MODEL_PRICING_FALLBACK
+
+/**
+ * Install the host pricing route's rows as the active table. Invalid or empty
+ * responses leave the previous table in place, so a bad payload can never
+ * zero out billing.
+ * @param rows - pricing rows keyed by canonical model id.
+ */
+export function setPricingTable(rows: Record<string, ModelPricing> | null | undefined): void {
+  if (rows === null || rows === undefined || typeof rows !== 'object') return
+  const valid = Object.entries(rows).filter(([, row]) => {
+    return row !== null && typeof row === 'object'
+      && isFinitePrice(row.offPeak) && isFinitePrice(row.peak)
+  })
+  if (valid.length === 0) return
+  pricingTable = Object.fromEntries(valid)
+}
+
+/** Whether every bucket of a price row is a finite non-negative number. */
+function isFinitePrice(p: unknown): p is TokenPrices {
+  return p !== null && typeof p === 'object'
+    && [p.inputPerM, p.outputPerM, p.cacheReadPerM, p.cacheWritePerM]
+      .every((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0)
+}
+
+/** The provider's Beijing peak windows: 09:00–12:00 and 14:00–18:00. */
+const PEAK_WINDOWS_BJT: Array<[number, number]> = [
+  [9 * 3600 * 1000, 12 * 3600 * 1000],
+  [14 * 3600 * 1000, 18 * 3600 * 1000],
+]
+
+/**
+ * Whether a request's commit time falls in a Beijing peak window. Peak tier
+ * doubles the off-peak rates, so the window split is what makes the estimate
+ * match the provider's invoice.
+ * @param t - request commit time, epoch ms (any zone; converted to UTC+8).
+ * @returns true inside a peak window.
+ */
+export function isPeakHour(t: number): boolean {
+  const bjt = (((t + 8 * 3600 * 1000) % 86400000) + 86400000) % 86400000
+  return PEAK_WINDOWS_BJT.some(([start, end]) => bjt >= start && bjt < end)
+}
+
+/**
+ * Resolve one request's per-bucket prices: the longest pricing-table key the
+ * model id starts with (versioned ids match their base row), tiered by the
+ * commit time's Beijing peak window. Unknown models fall back to the
+ * V4-Flash off-peak table regardless of time — a conservative estimate beats
+ * inventing a peak surcharge for a model we cannot price.
+ * @param model - the request's model id.
+ * @param t - the request's commit time, epoch ms.
+ * @returns per-million-token prices for the four buckets.
+ */
+export function pricesForModel(model: string, t: number): TokenPrices {
+  const id = model.toLowerCase()
+  let best: string | null = null
+  for (const key of Object.keys(pricingTable)) {
+    if (id.startsWith(key.toLowerCase()) && (best === null || key.length > best.length)) best = key
+  }
+  if (best === null) return FLASH_OFF_PEAK
+  return isPeakHour(t) ? pricingTable[best].peak : pricingTable[best].offPeak
+}
+
+/**
+ * Price one per-request record under its own model's list prices at its own
+ * commit time — the CC Switch per-request calculator, DeepSeek edition.
+ * @param usage - the request's four token buckets.
+ * @param model - the request's model id.
+ * @param t - the request's commit time, epoch ms.
+ * @returns estimated cost in CNY.
+ */
+export function estimateRequestCost(
+  usage: Pick<TokenUsageProjection, 'uncachedInputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens'>,
+  model: string,
+  t: number,
+): number {
+  return estimateCost(usage, pricesForModel(model, t))
 }
 
 /**
@@ -368,7 +472,10 @@ export function collectRequestRecords(
       o: entry.o,
       r: entry.r,
       w: entry.w,
-      cost: estimateCost({ uncachedInputTokens: entry.i, outputTokens: entry.o, cacheReadTokens: entry.r, cacheWriteTokens: entry.w }),
+      cost: estimateRequestCost(
+        { uncachedInputTokens: entry.i, outputTokens: entry.o, cacheReadTokens: entry.r, cacheWriteTokens: entry.w },
+        entry.m, entry.t,
+      ),
     })
   }
   const logged = summaries.some((summary) => (summary.projectionValues?.usageLog?.entries?.length ?? 0) > 0)
@@ -611,12 +718,12 @@ export function formatTokensShort(value: number, zh: boolean, decimals: 1 | 2 = 
   if (zh) {
     if (value >= 1e8) return `${(value / 1e8).toFixed(2)} 亿`
     if (value >= 1e4) return `${(value / 1e4).toFixed(decimals)} 万`
-    return value.toLocaleString()
+    return String(value)
   }
   if (value >= 1e9) return `${(value / 1e9).toFixed(2)}B`
   if (value >= 1e6) return `${(value / 1e6).toFixed(2)}M`
   if (value >= 1e3) return `${(value / 1e3).toFixed(decimals)}K`
-  return value.toLocaleString()
+  return String(value)
 }
 
 /**
@@ -646,9 +753,11 @@ export function currencySymbol(currency: string | null | undefined): string {
 /**
  * Two-decimal money formatting for balance figures.
  * @param value - balance amount (the provider returns strings).
- * @returns fixed two-decimal string, or an em dash for non-finite values.
+ * @returns fixed two-decimal string, or an em dash for null/undefined/non-finite
+ * values (Number(null) is 0, which would render a balance that does not exist).
  */
 export function formatMoney(value: number | string | null | undefined): string {
+  if (value === null || value === undefined) return '—'
   const n = Number(value)
   return Number.isFinite(n) ? n.toFixed(2) : '—'
 }

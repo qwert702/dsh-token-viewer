@@ -11,9 +11,10 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
-import type { SessionId, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId } from '../src/client/types.ts'
+import type { SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import { TokenDetailPanel } from '../src/client/TokenDetailPanel.tsx'
+import { tokenDetailStore } from '../src/client/token-detail-store.ts'
 import {
   DEFAULT_TOKEN_PRICES, collectRequestRecords, estimateCost, estimateRequestCost, formatCost, formatCostExact, formatTokensShort,
   isPeakHour, modelStats, pricesForModel, projectStats, requestLogRows, resolveUsageRange, usageSummary, usageTrend,
@@ -21,11 +22,12 @@ import {
 } from '../src/client/derive.ts'
 import { zh } from '../src/client/locales.ts'
 
-const t: Parameters<typeof TokenDetailPanel>[0]['t'] = makeTranslate(zh, commonZh)
+const t: Parameters<typeof TokenDetailPanel>[0]['t'] = makeTranslate(zh)
 
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  tokenDetailStore.setOpen(false)
 })
 
 const sid = (k: string): SessionId => k as SessionId
@@ -66,16 +68,14 @@ const workspaceItems = [
 ]
 
 function panelProps(over: { open?: boolean; byId?: Record<string, SessionSummary | undefined>; items?: unknown[] } = {}) {
-  const setOpen = vi.fn()
   const openSession = vi.fn()
   const props = {
     t,
     openSession,
-    useStore: (sel: (s: { open: boolean }) => unknown) => sel({ open: over.open ?? true }),
     useSessions: (sel: (s: { byId: Record<string, SessionSummary | undefined> }) => unknown) => sel({ byId: over.byId ?? {} }),
     useWorkspaces: (sel: (s: { items: unknown[] }) => unknown) => sel({ items: over.items ?? [] }),
-    actions: { setOpen },
-  } as unknown as Parameters<typeof TokenDetailPanel>[0] & { openSession: ReturnType<typeof vi.fn>; actions: { setOpen: ReturnType<typeof vi.fn> } }
+  } as unknown as Parameters<typeof TokenDetailPanel>[0] & { openSession: ReturnType<typeof vi.fn> }
+  tokenDetailStore.setOpen(over.open ?? true)
   return props
 }
 
@@ -105,8 +105,8 @@ describe('TokenDetailPanel', () => {
     expect(screen.getByRole('tab', { name: '请求日志' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: '项目统计' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: '模型统计' })).toBeTruthy()
-    expect(screen.getByText('deepseek-v4-flash')).toBeTruthy() // default logs tab: model column
-    expect(screen.getByText('会话A')).toBeTruthy()
+    expect(screen.getAllByText('deepseek-v4-flash').length).toBeGreaterThan(0) // default logs tab: model column
+    expect(screen.getAllByText('会话A').length).toBeGreaterThan(0) // two billed requests on session a
   })
 
   it('switches tabs to the model table and back to projects', () => {
@@ -120,22 +120,23 @@ describe('TokenDetailPanel', () => {
   it('opens a session and closes the panel on a request-log row click', () => {
     const props = panelProps({ byId: liveById() })
     render(<TokenDetailPanel {...props} />)
-    fireEvent.click(screen.getByRole('button', { name: /会话A/ }))
+    fireEvent.click(screen.getAllByRole('button', { name: /会话A/ })[0]!)
     expect(props.openSession).toHaveBeenCalledWith(sid('a'))
-    expect(props.actions.setOpen).toHaveBeenCalledWith(false)
+    expect(tokenDetailStore.getSnapshot().open).toBe(false)
   })
 
   it('closes on the close button and on a backdrop click', () => {
     const viaButton = panelProps({ byId: liveById() })
     render(<TokenDetailPanel {...viaButton} />)
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
-    expect(viaButton.actions.setOpen).toHaveBeenCalledWith(false)
+    expect(tokenDetailStore.getSnapshot().open).toBe(false)
     cleanup()
 
+    tokenDetailStore.setOpen(true)
     const viaBackdrop = panelProps({ byId: liveById() })
     const view = render(<TokenDetailPanel {...viaBackdrop} />)
     fireEvent.click(view.container.querySelector('[data-token-detail]')!)
-    expect(viaBackdrop.actions.setOpen).toHaveBeenCalledWith(false)
+    expect(tokenDetailStore.getSnapshot().open).toBe(false)
   })
 })
 

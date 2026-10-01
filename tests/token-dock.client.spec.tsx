@@ -8,15 +8,14 @@
 import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import { TokenDock } from '../src/client/TokenDock.tsx'
 import { zh } from '../src/client/locales.ts'
 
-const t: Parameters<typeof TokenDock>[0]['t'] = makeTranslate(zh, commonZh)
+const t: Parameters<typeof TokenDock>[0]['t'] = makeTranslate(zh)
 
 afterEach(cleanup)
 
-/** Token-meter projection fixtures. */
+/** Token-meter projection fixtures: real projection field names, spread overrides. */
 function makeUsage(over: Partial<{ uncached: number; output: number; cacheRead: number; cacheWrite: number }> = {}) {
   return {
     uncachedInputTokens: over.uncached ?? 1200,
@@ -26,11 +25,12 @@ function makeUsage(over: Partial<{ uncached: number; output: number; cacheRead: 
   }
 }
 
-function makePressure(over: Partial<{ projected: number; pressure: number; window: number }> = {}) {
+function makePressure(over: Partial<{ projectedTokens: number; pressureTokens: number; contextWindow: number }> = {}) {
   return {
-    projectedTokens: over.projected ?? 15200,
-    pressureTokens: over.pressure ?? 14000,
-    contextWindow: over.window ?? 64000,
+    projectedTokens: 15200,
+    pressureTokens: 14000,
+    contextWindow: 64000,
+    ...over,
   }
 }
 
@@ -69,7 +69,7 @@ describe('TokenDock', () => {
   it('drops the context segment until both numerator and capacity are known', () => {
     const withoutWindow = render(<TokenDock {...dockProps((key) => {
       if (key === 'tokenUsage') return makeUsage()
-      if (key === 'contextPressure') return makePressure({ window: undefined })
+      if (key === 'contextPressure') return makePressure({ contextWindow: undefined })
       return undefined
     })} />)
     expect(withoutWindow.queryByText(/上下文/)).toBeNull()
@@ -82,7 +82,7 @@ describe('TokenDock', () => {
   it('falls back to the bare pressure sample for occupancy', () => {
     const view = render(<TokenDock {...dockProps((key) => {
       if (key === 'tokenUsage') return makeUsage()
-      if (key === 'contextPressure') return makePressure({ projected: undefined, pressure: 16000 })
+      if (key === 'contextPressure') return makePressure({ projectedTokens: undefined, pressureTokens: 16000 })
       return undefined
     })} />)
     // 16000 / 64000 = 25%; projectedTokens is absent so the sample drives it.
@@ -92,7 +92,7 @@ describe('TokenDock', () => {
   it('clamps occupancy at 100 percent', () => {
     const view = render(<TokenDock {...dockProps((key) => {
       if (key === 'tokenUsage') return makeUsage()
-      if (key === 'contextPressure') return makePressure({ projected: 200000 })
+      if (key === 'contextPressure') return makePressure({ projectedTokens: 200000 })
       return undefined
     })} />)
     expect(view.getByText('100%')).toBeTruthy()

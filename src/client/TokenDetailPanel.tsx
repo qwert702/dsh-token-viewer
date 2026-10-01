@@ -28,6 +28,7 @@ import {
   collectRequestRecords, formatCostExact, formatTokensShort, modelStats, projectStats,
   requestLogRows, resolveUsageRange, usageSummary, usageTrend, type UsageRange,
 } from './derive.ts'
+import { usePricingTable } from './balance.ts'
 import { requireKit } from './kit.ts'
 import { tokenDetailStore, useTokenDetailOpen } from './token-detail-store.ts'
 import css from './TokenDetailPanel.module.css'
@@ -160,10 +161,16 @@ function TokenDetailBody({ useSessions, useWorkspaces, t, openSession }: TokenDe
   const open = useTokenDetailOpen()
   const byId = useSessions((state) => state.byId)
   const workspaceItems = useWorkspaces((state) => state.items)
+  // Installs the host pricing route's rows as the active billing table; the
+  // records memo re-folds when the rows land so costs reprice in place.
+  const pricingRows = usePricingTable()
   const [range, setRange] = useState<UsageRange>('today')
   const [tab, setTab] = useState<Tab>('logs')
   const now = useMemo(() => Date.now(), [range, byId])
-  const records = useMemo(() => collectRequestRecords(byId, range, now), [byId, range, now])
+  const records = useMemo(
+    () => collectRequestRecords(byId, range, now),
+    [byId, range, now, pricingRows],
+  )
   const summary = useMemo(() => usageSummary(records), [records])
   const trend = useMemo(() => usageTrend(records, range, now), [records, range, now])
   const models = useMemo(() => modelStats(records), [records])

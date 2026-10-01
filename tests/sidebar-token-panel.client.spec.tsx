@@ -9,15 +9,16 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
-import type { SessionId, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId } from '../src/client/types.ts'
+import type { SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import { BalanceRow } from '../src/client/BalanceRow.tsx'
 import { PerSessionList } from '../src/client/PerSessionList.tsx'
 import { SidebarTokenPanel } from '../src/client/SidebarTokenPanel.tsx'
 import { currencySymbol, derivePerSession, formatMoney } from '../src/client/derive.ts'
+import { tokenDetailStore } from '../src/client/token-detail-store.ts'
 import { zh } from '../src/client/locales.ts'
 
-const t: Parameters<typeof SidebarTokenPanel>[0]['t'] = makeTranslate(zh, commonZh)
+const t: Parameters<typeof SidebarTokenPanel>[0]['t'] = makeTranslate(zh)
 
 afterEach(() => {
   cleanup()
@@ -31,21 +32,24 @@ function makeSummary(id: string, usage: { uncached: number; output: number; cach
     id: sid(id),
     displayTitle: `会话${id.toUpperCase()}`,
     updatedAt: 1,
-    projectionValues: usage === undefined ? {} : { tokenUsage: usage },
+    projectionValues: usage === undefined ? {} : {
+      tokenUsage: {
+        uncachedInputTokens: usage.uncached,
+        outputTokens: usage.output,
+        cacheReadTokens: usage.cacheRead,
+        cacheWriteTokens: usage.cacheWrite,
+      },
+    },
   } as SessionSummary
 }
 
-function panelProps(byId: Record<string, SessionSummary | undefined>, wide = true) {
+function panelProps(byId: Record<string, SessionSummary | undefined>) {
   const openSession = vi.fn()
-  const setOpen = vi.fn()
   return {
-    wide,
     t,
     openSession,
-    useStore: (sel: (s: { open: boolean }) => unknown) => sel({ open: false }),
-    actions: { setOpen },
     useSessions: (sel: (state: { byId: Record<string, SessionSummary | undefined> }) => unknown) => sel({ byId }),
-  } as unknown as Parameters<typeof SidebarTokenPanel>[0] & { openSession: ReturnType<typeof vi.fn>; actions: { setOpen: ReturnType<typeof vi.fn> } }
+  } as unknown as Parameters<typeof SidebarTokenPanel>[0] & { openSession: ReturnType<typeof vi.fn> }
 }
 
 function stubBalanceOk() {
@@ -166,26 +170,22 @@ describe('SidebarTokenPanel', () => {
     expect(props.openSession).toHaveBeenCalledWith(sid('a'))
   })
 
-  it('opens the detail panel from the detail button', () => {
+  it('opens the shared detail store from the detail button', () => {
     const props = panelProps({
       a: makeSummary('a', { uncached: 1200, output: 3450, cacheRead: 11000, cacheWrite: 300 }),
     })
     render(<SidebarTokenPanel {...props} />)
+    tokenDetailStore.setOpen(false)
     fireEvent.click(screen.getByRole('button', { name: /用量详情/ }))
-    expect(props.actions.setOpen).toHaveBeenCalledWith(true)
+    expect(tokenDetailStore.getSnapshot().open).toBe(true)
+    tokenDetailStore.setOpen(false)
   })
 
-  it('renders nothing in the collapsed rail and nothing without usage when balance fails', async () => {
+  it('shows the empty state without usage when balance fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network') }))
-    const withUsage = panelProps({
-      a: makeSummary('a', { uncached: 1200, output: 3450, cacheRead: 11000, cacheWrite: 300 }),
-    }, false)
-    const rail = render(<SidebarTokenPanel {...withUsage} />)
-    expect(rail.container.firstChild).toBeNull()
-    cleanup()
-
     const noUsage = panelProps({ a: makeSummary('a', undefined) })
     render(<SidebarTokenPanel {...noUsage} />)
-    await waitFor(() => expect(screen.queryByText('Token 消耗')).toBeNull())
+    await waitFor(() => expect(screen.getByText('暂无数据')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: /按会话查看/ })).toBeNull()
   })
 })

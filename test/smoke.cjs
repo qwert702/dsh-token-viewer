@@ -235,13 +235,22 @@ async function checkHostHalf() {
   check(typeof host.apply === 'function', 'exports apply()')
   check(typeof host.name === 'string' && host.name !== '', 'exports a plugin name', host.name)
   check(Array.isArray(host.inject), 'exports an inject list', host.inject)
-  for (const service of ['webServer', 'credentials', 'settings', 'sessionProjections']) {
+  for (const service of ['webServer', 'credentials', 'sessionProjections']) {
     check(
       Array.isArray(host.inject) && host.inject.includes(service),
       `inject list carries ${service}`,
       host.inject,
     )
   }
+  check(
+    Array.isArray(host.inject) && !host.inject.includes('settings'),
+    'inject list no longer depends on the removed settings.register service',
+    host.inject,
+  )
+  check(
+    host.Config !== undefined && (typeof host.Config === 'object' || typeof host.Config === 'function'),
+    'exports a Config schema (the 0.1.7+/0.2.0 config channel)',
+  )
 
   const records = []
   const hostCtx = {

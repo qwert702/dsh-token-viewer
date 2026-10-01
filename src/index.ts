@@ -3,13 +3,18 @@
  * and the provider pricing table the browser half renders, plus the two
  * session projections (`modelUsage`, `usageLog`) its surfaces fold.
  *
- * `GET /api/billing/balance` reads its configuration from the harness settings
- * namespace `dsh-token-viewer` (which credential reference and provider base
- * URL to use), resolves the API key through the credentials service (the
- * harness-managed secret store), and proxies the provider's `/user/balance`
- * response without ever exposing the key. `GET /api/billing/pricing` serves
- * the provider's list prices, fetched from the official pricing page with a
- * short TTL and falling back to the built-in table.
+ * `GET /api/billing/balance` reads its configuration from the plugin's
+ * `Config` export (the credential reference and provider base URL), applied
+ * per profile entry by the loader (`apply(ctx, config)`), resolves the API key
+ * through the credentials service (the harness-managed secret store), and
+ * proxies the provider's `/user/balance` response without ever exposing the
+ * key. `GET /api/billing/pricing` serves the provider's list prices, fetched
+ * from the official pricing page with a short TTL and falling back to the
+ * built-in table.
+ *
+ * Config note: the 0.1.7+ settings service (`SettingsForms`) no longer hosts
+ * `settings.register()`; the `Config` export is the sanctioned config channel
+ * on 0.1.7 and 0.2.0 alike.
  *
  * The browser half ships via exports["./client"], discovered through the
  * package.json dsh.client declaration.
@@ -20,8 +25,6 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 // Type-only: pulls the credentials Context merge (ctx.credentials).
 import type {} from '@deepseek-ai/dsh-credentials'
-// Type-only: pulls the settings Context merge (ctx.settings).
-import type {} from '@deepseek-ai/dsh-settings'
 // Type-only: pulls the sessionProjections Context merge.
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -34,13 +37,18 @@ const DEFAULT_API_KEY_REF = 'DEEPSEEK_API_KEY'
 /** DeepSeek API base URL (adapter default). */
 const DEFAULT_BASE_URL = 'https://api.deepseek.com'
 
-/** Settings namespace holding the balance proxy configuration. */
-const BALANCE_NAMESPACE = 'dsh-token-viewer'
 /** Schema: the credential reference resolving to the API key, and the provider base URL. */
 const BALANCE_SCHEMA = z.object({
   apiKeyRef: z.string().default(DEFAULT_API_KEY_REF),
   baseURL: z.string().default(DEFAULT_BASE_URL),
 })
+
+/**
+ * The plugin's config schema, read from the profile entry by the loader and
+ * handed to `apply(ctx, config)` (the 0.1.7+/0.2.0 config channel).
+ */
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const Config = BALANCE_SCHEMA
 
 /** Resolved balance proxy configuration. */
 interface BalanceConfig {
@@ -83,6 +91,16 @@ export interface UsageLogEntry {
 interface UsageLogState {
   entries: UsageLogEntry[]
 }
+
+/**
+ * Retention cap on the usageLog projection. The fold publishes the whole
+ * entries array on every billed step, so an uncapped log makes each publish
+ * (and its immutable copy) grow without bound. Beyond the cap the oldest
+ * entries drop, newest-first retention: the statistics panel's widest preset
+ * covers 30 days, and 10k requests far exceeds any honest window. stateVersion
+ * bumps to 2 so persisted projection caches fold again under the cap.
+ */
+const MAX_USAGE_LOG_ENTRIES = 10_000
 
 declare module '@deepseek-ai/dsh-session-projection' {
   interface SessionProjectionMap {
@@ -184,7 +202,8 @@ function usageLogApply(state: UsageLogState, event: SessionEvent): UsageLogState
   const r = usage.cacheReadTokens ?? 0
   const w = usage.cacheWriteTokens ?? 0
   if (usage.inputTokens + usage.outputTokens + r + w <= 0) return state
-  return { entries: [...state.entries, { t: event.time, m: model, i: usage.inputTokens, o: usage.outputTokens, r, w }] }
+  const entries = [...state.entries, { t: event.time, m: model, i: usage.inputTokens, o: usage.outputTokens, r, w }]
+  return { entries: entries.length > MAX_USAGE_LOG_ENTRIES ? entries.slice(entries.length - MAX_USAGE_LOG_ENTRIES) : entries }
 }
 
 /**
@@ -211,7 +230,7 @@ function installUsageProjections(ctx: Context): void {
     projectionCtx.sessionProjections.register({
       key: 'usageLog',
       stateSchema: usageLogStateSchema,
-      stateVersion: 1,
+      stateVersion: 2,
       init: (): UsageLogState => ({ entries: [] }),
       apply: usageLogApply,
       wire: {
@@ -324,7 +343,9 @@ export function parsePricingPage(html: string): PricingTable | null {
     for (const pattern of modelPatterns) {
       const idx = html.search(pattern.re)
       if (idx < 0) continue
-      const block = html.slice(idx, idx + 8000)
+      // wide enough to cover both models' side-by-side columns and the
+      // long-context rows below them; a narrow window truncates the pro column
+      const block = html.slice(idx, idx + 24000)
       // the price table lists models side by side: each row carries one
       // "N元" figure per model (flash first, then pro). Collect every row's
       // figures and pick the model's column.
@@ -418,17 +439,20 @@ async function handlePricing(req: IncomingMessage, res: ServerResponse): Promise
 }
 
 /**
- * Register the usage projections, the settings namespace, and the balance and
- * pricing routes for the browser half.
- * @param ctx - host context carrying the webServer, credentials, settings, and sessionProjections services.
+ * Register the usage projections, and the balance and pricing routes for the
+ * browser half. The balance route reads the loader-applied entry config
+ * (`apiKeyRef`, `baseURL`), falling back to the adapter defaults when the
+ * entry carries no config.
+ * @param ctx - host context carrying the webServer, credentials, and sessionProjections services.
+ * @param config - the profile entry's validated config (absent when mounted bare).
  */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config?: Partial<BalanceConfig>): void {
   installUsageProjections(ctx)
-  let source: () => BalanceConfig = () => ({ apiKeyRef: DEFAULT_API_KEY_REF, baseURL: DEFAULT_BASE_URL })
-  ctx.inject(['settings'], (settingsCtx) => {
-    const scope = settingsCtx.settings.register(BALANCE_NAMESPACE, BALANCE_SCHEMA)
-    source = () => scope.get()
-  })
+  const resolved: BalanceConfig = {
+    apiKeyRef: config?.apiKeyRef ?? DEFAULT_API_KEY_REF,
+    baseURL: config?.baseURL ?? DEFAULT_BASE_URL,
+  }
+  const source = (): BalanceConfig => resolved
   ctx.effect(
     () => ctx.webServer.register({
       kind: 'exact',
@@ -449,5 +473,5 @@ export function apply(ctx: Context): void {
 
 /** Cordis plugin name for the host half. */
 export const name = 'dsh-token-viewer-host'
-/** Services required by the balance route, its settings namespace, and the usage projections. */
-export const inject = ['webServer', 'credentials', 'settings', 'sessionProjections']
+/** Services required by the balance route and the usage projections. */
+export const inject = ['webServer', 'credentials', 'sessionProjections']

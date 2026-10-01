@@ -8,7 +8,7 @@ CC Switch-style token consumption statistics for the **DeepSeek Harness Web GUI*
 > ```
 > Restart the harness, refresh the web page, then click the **Token** icon in the sidebar panel list; the account balance also shows up as a chip at the bottom of the sidebar.
 
-Targets harness **0.1.6-alpha.2**. Earlier versions of this plugin disabled the official `ui-sidebar` plugin and forked its `sidebar.workspaces.header` slot; that slot is gone in 0.1.6, so **v0.2.1 and later no longer override any official plugin** — it registers into the stock slots instead. On an older harness, pin v0.2.0.
+Targets harness **0.2.0-rc.2** (and 0.1.6+ — slot names, projection APIs, and service contracts are unchanged between those releases; **v0.3.0** switches to the loader-applied plugin `Config` export, the sanctioned config channel since the settings service became `SettingsForms`). Earlier versions of this plugin disabled the official `ui-sidebar` plugin and forked its `sidebar.workspaces.header` slot; that slot is gone in 0.1.6, so **v0.2.1 and later no longer override any official plugin** — it registers into the stock slots instead. On an older harness, pin v0.2.0.
 
 ## Features
 
@@ -16,13 +16,13 @@ Targets harness **0.1.6-alpha.2**. Earlier versions of this plugin disabled the 
 - **Balance chip** — the sidebar footer carries the live account balance (full amount when the sidebar is wide, a bare currency mark on the collapsed rail); clicking it opens the statistics drawer.
 - **TokenDock** — a slim live strip above the composer showing the current session's billed input (uncached + cache read + cache write), output, cache hit rate, and approximate context occupancy.
 - **Usage statistics panel** (drawer in `shell.overlay`, a faithful port of CC Switch's usage-dashboard method):
-  - **Per-request statistics** — the host `usageLog` projection records one timestamped entry per reported assistant step (commit time, model, four token buckets); every figure folds these records, never cumulative session totals.
+  - **Per-request statistics** — the host `usageLog` projection records one timestamped entry per reported assistant step (commit time, model, four token buckets); every figure folds these records, never cumulative session totals. The projection retains the newest 10,000 entries per session (stateVersion 2), so long-lived sessions stop growing the fold and the wire payload at that point.
   - **Hero** — real consumption (fresh input + output + cache write + cache read), request count, total cost, over a five-card breakdown row with a cache-hit-rate progress bar.
   - **Trend chart** — requests bucketed by their own commit time (hourly for the day, daily otherwise, empty buckets zero-filled), four token series plus a dashed cost line.
   - **Three tabs** — request log (newest first; clicking a row opens that session), per-project statistics, and per-model statistics with average cost.
   - **Range presets** — today / 7d / 14d / 30d / all, resolved exactly like CC Switch (local midnight of N−1 days back).
-- **Per-model peak/off-peak list pricing** — every request bills under its own model's provider list price (V4-Flash / V4-Pro, CNY per 1M tokens, cache writes at the cache-miss rate), split by the provider's Beijing peak windows (09:00–12:00 and 14:00–18:00, double the off-peak rate); versioned model ids match by prefix, unknown models fall back to the V4-Flash off-peak table. Prices live in `PRICING_FALLBACK` in the host half (see below).
-- **Balance route** — `GET /api/billing/balance` proxies DeepSeek's `/user/balance` through the harness credentials service; the API key never leaves the server.
+- **Per-model peak/off-peak list pricing** — every request bills under its own model's provider list price (V4-Flash / V4-Pro, CNY per 1M tokens, cache writes at the cache-miss rate), split by the provider's Beijing peak windows (09:00–12:00 and 14:00–18:00, double the off-peak rate); versioned model ids match by prefix, unknown models fall back to the V4-Flash off-peak table. Prices come from `GET /api/billing/pricing` (fetched by the statistics drawer; the browser mirrors the built-in table as a fallback), and `PRICING_FALLBACK` in the host half holds the current list prices (see below).
+- **Balance route** — `GET /api/billing/balance` proxies DeepSeek's `/user/balance` through the harness credentials service; the API key never leaves the server. The credential reference (`apiKeyRef`, default `DEEPSEEK_API_KEY`) and provider base URL (`baseURL`) ride the plugin entry's config in the profile (defaults apply when unset).
 
 ## Screenshots
 
@@ -56,7 +56,7 @@ The TypeScript monorepo source (extracted from `deepseek-ai/deepseek-harness`) l
 
 ## Model pricing
 
-`PRICING_FALLBACK` in `src/index.ts` (built into `lib/index.js`) holds the current DeepSeek list prices; the panel fetches `GET /api/billing/pricing`, which prefers the provider's official pricing page when reachable and falls back to the built-in table otherwise. The browser half carries no pricing table of its own — it bills purely from what the route returns.
+`PRICING_FALLBACK` in `src/index.ts` (built into `lib/index.js`) holds the current DeepSeek list prices; the panel fetches `GET /api/billing/pricing`, which prefers the provider's official pricing page when reachable and falls back to the built-in table otherwise. The statistics drawer installs the route's rows as its active billing table and re-folds its costs when they land; the browser carries the same rows as `MODEL_PRICING_FALLBACK` in `src/client/derive.ts`, so an unreachable route degrades to the same prices instead of inventing any. The per-session list and the composer dock keep billing at the flash off-peak floor — those figures are aggregate estimates without per-request times.
 
 ## License
 
