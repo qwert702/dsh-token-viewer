@@ -168,10 +168,12 @@ async function buildClient(esbuild) {
     // The repo's tsconfig.json extends a path from the upstream monorepo, which
     // does not exist in an installed checkout; compile settings live here.
     tsconfigRaw: { compilerOptions: { jsx: 'react-jsx' } },
-    // Everything the runtime seeds (react + the framework modules) stays a
-    // runtime require; the loader validates the bundle's own requires against
-    // the graph, so nothing may be inlined behind its back.
+    // The runtime's static module table seeds react and the framework modules;
+    // everything else in the bundle must be self-contained. PNGs inline as data
+    // URIs — a separate emitted file could never be served by the single-file
+    // module loader.
     external: STATIC_MODULES,
+    loader: { '.png': 'dataurl' },
     plugins: [cssModulesPlugin],
     banner: {
       js: [

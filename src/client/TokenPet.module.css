@@ -5,11 +5,11 @@
 .pet {
   position: fixed;
   right: 18px;
-  bottom: 18px;
+  bottom: 14px;
   z-index: 10;
   box-sizing: border-box;
-  width: 84px;
-  height: 84px;
+  width: 104px;
+  height: 130px;
   font: inherit;
   cursor: pointer;
   background: 0 0;
@@ -21,43 +21,43 @@
 }
 
 .pet:hover {
-  transform: scale(1.08);
+  transform: scale(1.06);
 }
 
 .pet:focus-visible {
   outline: 2px solid var(--dsw-alias-border-focus, #5b8def);
   outline-offset: 2px;
-  border-radius: 50%;
+  border-radius: 16px;
 }
 
-.svg {
+/* The chibi artwork bobs gently; off-peak dims it a touch for night mode. */
+.maid {
   width: 100%;
   height: 100%;
+  object-fit: contain;
+  object-position: bottom;
+  user-select: none;
+  filter: drop-shadow(0 4px 10px rgb(0 0 0 / 0.22));
   animation: tv-pet-bob 3.2s ease-in-out infinite;
-  transform-origin: 50% 80%;
+  transform-origin: 50% 85%;
+}
+
+.pet[data-pet-state='off-peak'] .maid {
+  filter: brightness(0.86) saturate(0.88) drop-shadow(0 4px 10px rgb(0 0 0 / 0.18));
 }
 
 /* Peak: awake and uneasy — the bob turns into a quicker wiggle. */
-.pet[data-pet-state='peak'] .svg {
+.pet[data-pet-state='peak'] .maid {
   animation: tv-pet-wiggle 1.4s ease-in-out infinite;
-}
-
-.tail {
-  transform-origin: 88px 58px;
-  animation: tv-pet-tail 3.2s ease-in-out infinite;
-}
-
-.pet[data-pet-state='peak'] .tail {
-  animation-duration: 1.4s;
 }
 
 .badge {
   position: absolute;
-  top: -2px;
-  right: -2px;
-  font-size: 15px;
+  top: 0;
+  right: 2px;
+  font-size: 17px;
   line-height: 1;
-  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.25));
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.3));
 }
 
 .pet[data-pet-state='peak'] .badge {
@@ -66,18 +66,18 @@
 
 .zzz {
   position: absolute;
-  top: -6px;
-  left: 6px;
-  font-size: 14px;
+  top: -2px;
+  left: 8px;
+  font-size: 16px;
   line-height: 1;
   animation: tv-pet-rise 2.6s ease-in-out infinite;
 }
 
 .sweat {
   position: absolute;
-  top: 14px;
-  right: 8px;
-  font-size: 12px;
+  top: 18px;
+  right: 12px;
+  font-size: 13px;
   line-height: 1;
   animation: tv-pet-fall 1.4s ease-in infinite;
 }
@@ -90,11 +90,6 @@
 @keyframes tv-pet-wiggle {
   0%, 100% { transform: rotate(-2.5deg); }
   50% { transform: rotate(2.5deg); }
-}
-
-@keyframes tv-pet-tail {
-  0%, 100% { transform: rotate(0deg); }
-  50% { transform: rotate(-6deg); }
 }
 
 @keyframes tv-pet-pulse {
@@ -115,7 +110,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pet, .pet:hover, .svg, .tail, .badge, .zzz, .sweat {
+  .pet, .pet:hover, .maid, .badge, .zzz, .sweat {
     animation: none;
     transition: none;
   }

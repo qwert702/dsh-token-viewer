@@ -1,6 +1,6 @@
 {
   "name": "dsh-token-viewer",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Token consumption statistics for the DeepSeek Harness Web GUI: a Token panel in the sidebar's global panel list, a compact account-balance chip in the sidebar foot, a live usage strip above the composer, a CC Switch-style statistics drawer (per-request log, request-time-bucketed trend, per-model and per-project pricing tables), and a bottom-right whale-maid pet showing the active DeepSeek pricing tier (off-peak asleep, peak awake).",
   "type": "module",
   "main": "lib/index.js",

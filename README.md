@@ -14,7 +14,7 @@ Targets harness **0.2.0-rc.2** (and 0.1.6+ — slot names, projection APIs, and 
 
 - **Sidebar panel** — a **Token** row in the sidebar's global panel list; clicking it opens the plugin's page in the main area: DeepSeek account balance (with refresh; error-retry when the host proxy fails) and aggregate consumption across all sessions, expandable to a per-conversation list.
 - **Balance chip** — the sidebar footer carries the live account balance (full amount when the sidebar is wide, a bare currency mark on the collapsed rail); clicking it opens the statistics drawer.
-- **Whale-maid pet** — a bottom-right pet (an original inline-SVG chibi whale in a maid headband — no third-party artwork) showing the active pricing tier: asleep with a moon badge and rising Z's through the off-peak windows, awake with a lightning badge through the Beijing peak windows. The tooltip shows the tier, the countdown to the next window boundary, and the currently applicable flash prices; clicking the pet opens the statistics drawer, and the pet tucks itself away while the drawer is open.
+- **Whale-maid pet** — a bottom-right pet showing the active pricing tier: asleep with a moon badge and rising Z's through the off-peak windows, awake with a lightning badge through the Beijing peak windows. The tooltip shows the tier, the countdown to the next window boundary, and the currently applicable flash prices; clicking the pet opens the statistics drawer, and the pet tucks itself away while the drawer is open.
 - **TokenDock** — a slim live strip above the composer showing the current session's billed input (uncached + cache read + cache write), output, cache hit rate, and approximate context occupancy.
 - **Usage statistics panel** (drawer in `shell.overlay`, a faithful port of CC Switch's usage-dashboard method):
   - **Per-request statistics** — the host `usageLog` projection records one timestamped entry per reported assistant step (commit time, model, four token buckets); every figure folds these records, never cumulative session totals. The projection retains the newest 10,000 entries per session (stateVersion 2), so long-lived sessions stop growing the fold and the wire payload at that point.
@@ -62,4 +62,4 @@ The TypeScript monorepo source (extracted from `deepseek-ai/deepseek-harness`) l
 
 ## License
 
-MIT
+MIT, **except** `src/client/assets/whale-maid.png` (embedded into `lib/client.js`): the community's chibi DeepSeek whale-maid, from [yefeng7531/dsh-whale-maid-mascot](https://github.com/yefeng7531/dsh-whale-maid-mascot), originally published at [bilibili opus/1231977657712771073](https://www.bilibili.com/opus/1231977657712771073), licensed **CC BY-NC-SA 4.0** (non-commercial use only, share-alike; only rescaled to 135×240). See `src/client/assets/SOURCE.md`.
