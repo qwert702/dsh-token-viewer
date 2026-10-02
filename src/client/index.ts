@@ -1,5 +1,5 @@
 /**
- * Token consumption surface plugin, browser half. Five entries, one surface:
+ * Token consumption surface plugin, browser half. Six entries, one surface:
  *
  *  - `sidebar.panellist` — the Token row of the sidebar's global panel list
  *    (the glyph only; the sidebar owns the button and resolves the label).
@@ -8,7 +8,8 @@
  *  - `sidebar.footer.action` — the compact balance chip beside Settings.
  *  - `conversation.input.dock` — the live strip above the composer for the
  *    current Session.
- *  - `shell.overlay` — the CC Switch-style usage-statistics drawer.
+ *  - `shell.overlay` — the CC Switch-style usage-statistics drawer, plus the
+ *    bottom-right whale-maid pet showing the active pricing tier.
  *
  * Every surface reads host-computed values: the Session surfaces read the
  * `tokenUsage` / `contextPressure` / `contextBreakdown` projections, and the
@@ -38,6 +39,7 @@ import { TokenPanelIcon } from './TokenPanelIcon.tsx'
 import { BalanceChip } from './BalanceChip.tsx'
 import { TokenDock } from './TokenDock.tsx'
 import { TokenDetailPanel, type TokenDetailPanelInjected } from './TokenDetailPanel.tsx'
+import { TokenPet } from './TokenPet.tsx'
 import { en, zh, type TokenKey } from './locales.ts'
 
 export type { SidebarTokenPanelProps, SidebarTokenPanelInjected } from './SidebarTokenPanel.tsx'
@@ -45,6 +47,7 @@ export type { TokenPanelIconProps } from './TokenPanelIcon.tsx'
 export type { BalanceChipProps, BalanceChipOwnerProps } from './BalanceChip.tsx'
 export type { TokenDetailPanelProps, TokenDetailPanelInjected } from './TokenDetailPanel.tsx'
 export type { TokenDockProps } from './TokenDock.tsx'
+export type { TokenPetProps } from './TokenPet.tsx'
 export type { TokenKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -119,4 +122,11 @@ export function apply(ctx: ClientContext): void {
     locale: NS,
     inject: injected,
   }, TokenDetailPanel))
+
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+    name: 'shell.overlay',
+    id: 'token-viewer-pet',
+    order: 20,
+    locale: NS,
+  }, TokenPet))
 }

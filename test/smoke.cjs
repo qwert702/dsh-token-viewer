@@ -174,7 +174,7 @@ function checkBrowserHalf() {
   check(dictionaryNamespaces.includes('tokenViewer'), 'registers the tokenViewer dictionary')
   const slots = registrations.map((entry) => entry.options.name)
   check(
-    JSON.stringify(slots) === JSON.stringify(Object.keys(SLOT_CONTRACT)),
+    JSON.stringify([...new Set(slots)]) === JSON.stringify(Object.keys(SLOT_CONTRACT)),
     'registers exactly the harness-declared slots',
     slots.join(', '),
   )
@@ -206,6 +206,12 @@ function checkBrowserHalf() {
     panelRow !== undefined && mainEntry !== undefined && panelRow.options.id === mainEntry.options.key,
     'the sidebar panel row addresses the registered main panel',
   )
+
+  // The pet is the shell.overlay's second entry: always-visible bottom-right.
+  const petEntry = registrations.find((entry) => entry.options.id === 'token-viewer-pet')
+  check(petEntry !== undefined, 'registers the token-viewer-pet overlay entry')
+  check(petEntry !== undefined && petEntry.options.order === 20, 'the pet entry orders after the drawer')
+  check(petEntry !== undefined && typeof petEntry.component === 'function', 'the pet entry registers a component')
 
   // A component that throws here would take the whole shell down at runtime.
   const kit = {

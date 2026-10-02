@@ -14,6 +14,7 @@ DeepSeek Harness 网页端 **CC Switch 风格 Token 消耗统计**插件。纯�
 
 - **侧边栏面板** — 侧边栏全局面板列表里的 **Token** 行；点击后主区打开插件页面：DeepSeek 账号余额（可刷新；host 代理失败显示错误重试）+ 全会话用量汇总，可展开按会话明细。
 - **余额 chip** — 侧边栏底部常驻账号余额（宽栏显示完整金额，收起成轨道时显示货币符号）；点击打开统计抽屉。
+- **鲸鱼娘宠物** — 右下角常驻一只原创内联 SVG 的 Q 版鲸鱼娘（女仆头饰，不使用任何第三方素材），实时显示当前牌价时段：谷时闭眼睡觉（🌙 角标 + 💤 上浮），北京高峰时段睁眼冒汗（⚡ 角标）。悬浮提示当前时段、下一窗口倒计时与现行 flash 牌价；点击打开统计抽屉，抽屉展开时宠物自动让位。
 - **TokenDock** — 输入区上方悬浮条：当前会话计费输入（未缓存 + 缓存读 + 缓存写）、输出、缓存命中率、近似上下文占用率。
 - **用量统计面板**（`shell.overlay` 抽屉，完整移植 CC Switch 用量看板口径）：
   - **按请求统计** — host 侧 `usageLog` 投影为每条上报用量的 assistant 步骤记录一条（提交时间、模型、四个 token 桶）；所有数字折叠自这些请求记录，而非会话累计值。投影按会话保留最近 10000 条（stateVersion 2），长会话的折叠与线上载荷到此封顶。
@@ -34,7 +35,7 @@ DeepSeek Harness 网页端 **CC Switch 风格 Token 消耗统计**插件。纯�
 
 ## 插槽布局
 
-共五个注册，全部使用原生插槽（见 `src/client/index.ts`）：
+共六个注册，全部使用原生插槽（见 `src/client/index.ts`）：
 
 | 插槽 | 界面 | Id |
 | --- | --- | --- |
@@ -43,6 +44,7 @@ DeepSeek Harness 网页端 **CC Switch 风格 Token 消耗统计**插件。纯�
 | `sidebar.footer.action` | 余额 chip | `token-viewer-balance` |
 | `conversation.input.dock` | 实时用量条 | `token-viewer` |
 | `shell.overlay` | 统计抽屉 | `token-viewer-detail` |
+| `shell.overlay` | 鲸鱼娘宠物 | `token-viewer-pet` |
 
 ## 仓库结构
 

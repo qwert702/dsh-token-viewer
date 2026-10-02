@@ -47,6 +47,11 @@ export const zh = {
   'trendExact': '按请求提交时间统计',
   'modelStats': '模型统计',
   'model': '模型',
+  'petPeak': '峰时（牌价 ×2）',
+  'petOffPeak': '谷时（标准牌价）',
+  'petUntilPeak': '距峰时还有',
+  'petUntilOffPeak': '距谷时还有',
+  'petPerM': '/百万 tokens',
 } satisfies Record<string, string>
 
 /** The tokenViewer namespace key union. */
@@ -99,4 +104,9 @@ export const en = {
   'trendExact': 'bucketed by request commit time',
   'modelStats': 'Model stats',
   'model': 'Model',
+  'petPeak': 'Peak hours (2× prices)',
+  'petOffPeak': 'Off-peak (standard prices)',
+  'petUntilPeak': 'peak starts in',
+  'petUntilOffPeak': 'off-peak starts in',
+  'petPerM': '/1M tokens',
 } satisfies Record<TokenKey, string>

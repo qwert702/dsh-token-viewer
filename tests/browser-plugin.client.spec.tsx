@@ -2,7 +2,7 @@
 /**
  * ui-token-viewer browser half: `apply()` runs against a recording slots and
  * locale face (the same stub shape the harness-free smoke test uses) and must
- * register exactly the five stock-slot entries of the 0.1.6+ contract — the
+ * register exactly the six stock-slot entries of the 0.1.6+ contract — the
  * sidebar panel row + keyed `main` page, the sidebar-foot balance chip, the
  * composer dock strip, and the shell overlay drawer — each waiting on
  * `slots.inject()` and carrying the tokenViewer locale namespace. Registration
@@ -16,14 +16,16 @@ import { TokenPanelIcon } from '../src/client/TokenPanelIcon.tsx'
 import { BalanceChip } from '../src/client/BalanceChip.tsx'
 import { TokenDock } from '../src/client/TokenDock.tsx'
 import { TokenDetailPanel } from '../src/client/TokenDetailPanel.tsx'
+import { TokenPet } from '../src/client/TokenPet.tsx'
 
-/** The five stock slots this plugin registers into, with 0.1.6+ entry facts. */
+/** The six stock-slot entries this plugin registers into, with 0.1.6+ entry facts. */
 const EXPECTED = [
   { slot: 'main', key: 'token', component: SidebarTokenPanel },
   { slot: 'sidebar.panellist', id: 'token', order: 30, component: TokenPanelIcon },
   { slot: 'sidebar.footer.action', id: 'token-viewer-balance', order: 10, component: BalanceChip },
   { slot: 'conversation.input.dock', id: 'token-viewer', order: 20, component: TokenDock },
   { slot: 'shell.overlay', id: 'token-viewer-detail', order: 10, component: TokenDetailPanel },
+  { slot: 'shell.overlay', id: 'token-viewer-pet', order: 20, component: TokenPet },
 ]
 
 interface Recording {
@@ -65,7 +67,7 @@ describe('ui-token-viewer browser plugin', () => {
     expect(inject).toEqual(['slots', 'locale'])
   })
 
-  it('registers exactly the five stock-slot entries', () => {
+  it('registers exactly the six stock-slot entries', () => {
     const b = makeCtx()
     apply(b.ctx)
     expect(b.dictionaries).toContain('tokenViewer')
@@ -105,6 +107,7 @@ describe('ui-token-viewer browser plugin', () => {
     apply(b.ctx)
     for (const registration of b.registrations) {
       if (registration.options.name !== 'main' && registration.options.name !== 'shell.overlay') continue
+      if (registration.options.inject === undefined) continue // the pet opts out of the shared verb
       // the register factory was already invoked by slots.inject(); re-invoke it
       // the way the harness does at seat time and read the inject face
       const face = (registration.options as { inject?: () => unknown }).inject?.()

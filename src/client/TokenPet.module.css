@@ -1,0 +1,122 @@
+/* The bottom-right whale-maid pet. `shell.overlay` is a click-through layer,
+   so the pet opts back into pointer events itself and stays below the
+   statistics drawer's scrim (which the pet yields to by rendering null). */
+
+.pet {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 10;
+  box-sizing: border-box;
+  width: 84px;
+  height: 84px;
+  font: inherit;
+  cursor: pointer;
+  background: 0 0;
+  border: none;
+  padding: 0;
+  line-height: 0;
+  pointer-events: auto;
+  transition: transform 160ms ease;
+}
+
+.pet:hover {
+  transform: scale(1.08);
+}
+
+.pet:focus-visible {
+  outline: 2px solid var(--dsw-alias-border-focus, #5b8def);
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+
+.svg {
+  width: 100%;
+  height: 100%;
+  animation: tv-pet-bob 3.2s ease-in-out infinite;
+  transform-origin: 50% 80%;
+}
+
+/* Peak: awake and uneasy — the bob turns into a quicker wiggle. */
+.pet[data-pet-state='peak'] .svg {
+  animation: tv-pet-wiggle 1.4s ease-in-out infinite;
+}
+
+.tail {
+  transform-origin: 88px 58px;
+  animation: tv-pet-tail 3.2s ease-in-out infinite;
+}
+
+.pet[data-pet-state='peak'] .tail {
+  animation-duration: 1.4s;
+}
+
+.badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  font-size: 15px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.25));
+}
+
+.pet[data-pet-state='peak'] .badge {
+  animation: tv-pet-pulse 1.4s ease-in-out infinite;
+}
+
+.zzz {
+  position: absolute;
+  top: -6px;
+  left: 6px;
+  font-size: 14px;
+  line-height: 1;
+  animation: tv-pet-rise 2.6s ease-in-out infinite;
+}
+
+.sweat {
+  position: absolute;
+  top: 14px;
+  right: 8px;
+  font-size: 12px;
+  line-height: 1;
+  animation: tv-pet-fall 1.4s ease-in infinite;
+}
+
+@keyframes tv-pet-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes tv-pet-wiggle {
+  0%, 100% { transform: rotate(-2.5deg); }
+  50% { transform: rotate(2.5deg); }
+}
+
+@keyframes tv-pet-tail {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-6deg); }
+}
+
+@keyframes tv-pet-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.25); }
+}
+
+@keyframes tv-pet-rise {
+  0% { opacity: 0; transform: translate(0, 4px); }
+  30% { opacity: 1; }
+  100% { opacity: 0; transform: translate(6px, -14px); }
+}
+
+@keyframes tv-pet-fall {
+  0% { opacity: 0; transform: translate(0, -2px); }
+  30% { opacity: 1; }
+  100% { opacity: 0; transform: translate(2px, 12px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pet, .pet:hover, .svg, .tail, .badge, .zzz, .sweat {
+    animation: none;
+    transition: none;
+  }
+}
